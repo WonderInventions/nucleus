@@ -4,7 +4,7 @@ import * as path from 'path';
 import * as debug from 'debug';
 
 import { spawnPromiseAndCapture, escapeShellArguments } from './spawn';
-import { syncDirectoryToStore, syncStoreToDirectory } from './sync';
+import { syncDirectoryToStore } from './sync';
 import { withTmpDir } from './tmp';
 import * as config from '../../config';
 
@@ -12,7 +12,7 @@ const d = debug(`nucleus:files:yum`);
 
 const getCreateRepoCommand = (dir: string, args: string[]): [string, string[]] => {
   if (process.platform === 'linux') {
-    return ['createrepo', args];
+    return ['createrepo_c', args];
   }
   return [
     'docker',
