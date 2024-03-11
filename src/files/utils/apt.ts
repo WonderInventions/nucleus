@@ -60,7 +60,7 @@ const generateReleaseFile = async (tmpDir: string, app: NucleusApp) => {
   await fs.writeFile(configFile, `APT::FTPArchive::Release::Origin "${config.organization || 'Nucleus'}";
 APT::FTPArchive::Release::Label "${app.name}";
 APT::FTPArchive::Release::Suite "stable";
-APT::FTPArchive::Release::Codename "debian";
+APT::FTPArchive::Release::Codename "binary";
 APT::FTPArchive::Release::Architectures "i386 amd64";
 APT::FTPArchive::Release::Components "main";
 APT::FTPArchive::Release::Description "${app.name}";`);
