@@ -27,6 +27,7 @@ const updateStaticReleaseMetaData = async (app: NucleusApp, channel: NucleusChan
     await positioner.updateDarwinReleasesFiles(lock, app, upToDateChannel, 'x64');
     await positioner.updateWin32ReleasesFiles(lock, app, upToDateChannel, 'ia32');
     await positioner.updateWin32ReleasesFiles(lock, app, upToDateChannel, 'x64');
+    await positioner.updateWin32ReleasesFiles(lock, app, upToDateChannel, 'arm64');
   });
 };
 
