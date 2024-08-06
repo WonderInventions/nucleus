@@ -304,7 +304,7 @@ router.post('/:id/channel/:channelId/temporary_releases/:temporarySaveId/release
     // Get up to date channel
     const upToDateChannel = (await driver.getChannel(req.targetApp, req.params.channelId))!;
     const storedVersion = upToDateChannel.versions.find(v => v.name === save.version)!;
-    const storedFiles = storedVersion.files.filter(f => storedFileNames.includes(f.fileName));
+    const storedFiles = storedVersion.files.filter(f => storedFileNames.includes(f.fileName) && f.arch === save.arch && f.platform === save.platform);
 
     for (const file of storedFiles) {
       d(`Releasing file: ${file.fileName} to version: ${save.version} for (${req.targetApp.slug}/${channel.name})`);
