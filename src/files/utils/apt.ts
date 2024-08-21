@@ -108,22 +108,26 @@ export const addFileToAptRepo = async (store: IFileStore, {
     const storeKey = path.posix.join(app.slug, channel.id, 'linux', 'debian');
     await fs.mkdirs(path.resolve(tmpDir, 'binary'));
 
-    // Find the latest Version for which we have a .deb File
+    // Download any files belonging to the latest version *except* that we want to avoid redownloading
+    // the same file we are adding
     let latestVersion;
-    let latestVersionFile;
+    let latestVersionFiles: NucleusFile[] = [];
     for (const version of channel.versions) {
       if (!version.dead && (!latestVersion || semver.gt(version.name, latestVersion.name))) {
-        const versionFile = (version.files || []).find((f) => f.fileName.endsWith(".deb") && f.platform === "linux");
-        if (versionFile) {
+        const versionFiles = (version.files || []).filter((f) => f.fileName.endsWith(".deb") && f.platform === "linux");
+        if (versionFiles) {
           latestVersion = version;
-          latestVersionFile = versionFile;
+          latestVersionFiles = versionFiles;
         }
       }
     }
-    if (latestVersion && latestVersionFile && internalVersion.name !== latestVersion.name) {
-      // There's a newer version than the one we're uploading (rare!). Download that .deb.
-      const fname = `${latestVersion.name}-${latestVersionFile.fileName}`;
-      await fs.writeFile(`${tmpDir}/binary/${fname}`, await store.getFile(`${storeKey}/binary/${fname}`));
+    if (latestVersion && latestVersionFiles.length) {
+      for (const otherFile of latestVersionFiles) {
+        if (otherFile.fileName !== file.fileName || internalVersion.name !== latestVersion.name) {
+          const fname = `${latestVersion.name}-${otherFile.fileName}`;
+          await fs.writeFile(`${tmpDir}/binary/${fname}`, await store.getFile(`${storeKey}/binary/${fname}`));
+        }
+      }
     }
 
     const binaryPath = path.resolve(tmpDir, 'binary', `${internalVersion.name}-${file.fileName}`);
