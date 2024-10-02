@@ -61,7 +61,7 @@ const generateReleaseFile = async (tmpDir: string, app: NucleusApp) => {
 APT::FTPArchive::Release::Label "${app.name}";
 APT::FTPArchive::Release::Suite "stable";
 APT::FTPArchive::Release::Codename "binary";
-APT::FTPArchive::Release::Architectures "i386 amd64";
+APT::FTPArchive::Release::Architectures "amd64 arm64";
 APT::FTPArchive::Release::Components "main";
 APT::FTPArchive::Release::Description "${app.name}";`);
   const [exe, args] = getAptFtpArchiveCommand(tmpDir, ['-c=Release.conf', 'release', '.']);
@@ -76,7 +76,7 @@ APT::FTPArchive::Release::Description "${app.name}";`);
 };
 
 const writeAptMetadata = async (tmpDir: string, app: NucleusApp) => {
-  const packagesContent = await spawnAndGzip(getScanPackagesCommand(tmpDir, ['binary', '/dev/null']), tmpDir);
+  const packagesContent = await spawnAndGzip(getScanPackagesCommand(tmpDir, ['--multiversion', 'binary', '/dev/null']), tmpDir);
   await fs.writeFile(path.resolve(tmpDir, 'binary', 'Packages'), packagesContent[0]);
   await fs.writeFile(path.resolve(tmpDir, 'binary', 'Packages.gz'), packagesContent[1]);
   const sourcesContent = await spawnAndGzip(getScanSourcesCommand(tmpDir, ['binary', '/dev/null']), tmpDir);
