@@ -475,6 +475,7 @@ router.post('/:id/channel/:channelId/rollout', requireLogin, noPendingMigrations
       });
     }
     await updateStaticReleaseMetaData(req.targetApp, updatedChannel);
+    await driver.markOldVersionsAsDead(updatedChannel);
     res.json(updatedChannel);
   }
 }));
