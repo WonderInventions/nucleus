@@ -453,4 +453,20 @@ export default class SequelizeDriver extends BaseDriver {
 
     return this.fixFileStruct(rawFile);
   }
+
+  public async markOldVersionsAsDead(channel: NucleusChannel) {
+    await this.sequelize!.query(`
+      UPDATE nucleus.Version
+      SET dead = true
+      WHERE channelId = (SELECT id FROM nucleus.Channel c WHERE c.stringId = '${channel.id}') and !dead and id <
+        (SELECT MIN(id)
+         FROM (
+          SELECT v.id
+          FROM nucleus.Version v
+          JOIN nucleus.Channel c ON v.channelId = c.id
+          WHERE c.stringId = '${channel.id}'
+          ORDER BY v.id DESC
+          LIMIT 3) a
+        );`);
+  };
 }
