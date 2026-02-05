@@ -1,5 +1,6 @@
 import * as React from 'react';
 import { connect, Dispatch } from 'react-redux';
+import { useParams } from 'react-router-dom';
 import { UploadField } from '@navjobs/upload';
 
 import AkButton from '@atlaskit/button';
@@ -40,12 +41,11 @@ interface AppPageState {
   multiDraw: number;
 }
 
-class AppPage extends React.PureComponent<AppPageReduxProps & AppPageReduxDispatchProps & AppPageComponentProps, AppPageState> {
-  props: AppPageReduxProps & AppPageReduxDispatchProps & AppPageComponentProps & {
-    routeParams: {
-      appSlug: string;
-    },
-  };
+interface AppPageRouteProps {
+  routeParams: { appSlug: string };
+}
+
+class AppPageInner extends React.PureComponent<AppPageReduxProps & AppPageReduxDispatchProps & AppPageComponentProps & AppPageRouteProps, AppPageState> {
   state = {
     loading: false,
     resetting: false,
@@ -433,4 +433,11 @@ const mapDispatchToProps = (dispatch: Dispatch<void>) => ({
   setApps: (apps: NucleusApp[]) => dispatch(setApps(apps)),
 });
 
-export default connect<AppPageReduxProps, AppPageReduxDispatchProps, AppPageComponentProps>(mapStateToProps, mapDispatchToProps)(AppPage);
+const ConnectedAppPage = connect<AppPageReduxProps, AppPageReduxDispatchProps, AppPageComponentProps & AppPageRouteProps>(mapStateToProps, mapDispatchToProps)(AppPageInner);
+
+function AppPage() {
+  const params = useParams();
+  return <ConnectedAppPage routeParams={{ appSlug: params.appSlug || '' }} />;
+}
+
+export default AppPage;

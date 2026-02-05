@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { Router, Route, Redirect, browserHistory } from 'react-router';
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { connect } from 'react-redux';
 
 import { setBaseUpdateUrl } from './actions/base';
@@ -44,16 +44,16 @@ class App extends React.PureComponent<{
     }
 
     return (
-      <Router history={browserHistory}>
-        <Redirect from="" to="/apps" />
-        <Redirect from="/" to="/apps" />
-        <Route path="/" component={PageWrapper}>
-          <Route path="/apps" component={AppList} />
-          <Route path="/apps/:appSlug" component={AppPage} />
-          <Route path="/migrations" component={MigrationList} />
-          {/* <Route path="*" component={NotFoundPage} /> */}
-        </Route>
-      </Router>
+      <BrowserRouter>
+        <Routes>
+          <Route element={<PageWrapper />}>
+            <Route index element={<Navigate to="/apps" replace />} />
+            <Route path="/apps" element={<AppList />} />
+            <Route path="/apps/:appSlug" element={<AppPage />} />
+            <Route path="/migrations" element={<MigrationList />} />
+          </Route>
+        </Routes>
+      </BrowserRouter>
     );
   }
 }

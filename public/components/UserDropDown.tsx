@@ -1,11 +1,15 @@
 import * as React from 'react';
-import { withRouter, RouteComponentProps } from 'react-router';
 
 import DropdownList, { Group, Item } from '@atlaskit/droplist';
 
-class UserDropDown extends React.PureComponent<RouteComponentProps<void, void> & {
+interface UserDropDownProps {
   user: User;
-}, { open: boolean }> {
+  history: { push: (path: string) => void };
+  location: { pathname: string };
+  children?: React.ReactNode;
+}
+
+class UserDropDown extends React.PureComponent<UserDropDownProps, { open: boolean }> {
   constructor(props, context) {
     super(props, context);
 
@@ -69,4 +73,4 @@ class UserDropDown extends React.PureComponent<RouteComponentProps<void, void> &
   }
 }
 
-export default withRouter(UserDropDown);
+export default UserDropDown;
