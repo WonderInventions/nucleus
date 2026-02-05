@@ -1,18 +1,16 @@
 {
-	"compilerOptions": {
-		"module": "commonjs",
-		"target": "es6",
-		"outDir": "test_out",
-		"lib": [
-			"es6",
-			"dom"
-		],
-		"sourceMap": true,
-		"jsx": "react",
-		"experimentalDecorators": true
-	},
-	"exclude": [
-		"node_modules",
-		"public"
-	]
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "module": "commonjs",
+    "outDir": "test_out",
+    "rootDir": "."
+  },
+  "include": [
+    "src/**/*",
+    "typings/**/*"
+  ],
+  "exclude": [
+    "node_modules",
+    "public"
+  ]
 }

@@ -1,17 +1,22 @@
-import * as debug from 'debug';
-import * as express from 'express';
+import debug from 'debug';
+import express from 'express';
 import * as semver from 'semver';
-import * as isPng from 'is-png';
-import * as multer from 'multer';
+import isPng from 'is-png';
+import multer from 'multer';
 
 import { createA } from '../utils/a';
 import driver from '../db/driver';
 import store from '../files/store';
 import Positioner from '../files/Positioner';
 import { generateSHAs } from '../files/utils/sha';
-import WebHook from './WebHook';
 
 import { requireLogin, noPendingMigrations } from './_helpers';
+
+// Helper to extract string from Express 5 params (can be string | string[])
+const param = (value: string | string[] | undefined): string => {
+  if (Array.isArray(value)) return value[0] || '';
+  return value || '';
+};
 
 const d = debug('nucleus:rest');
 const router = express();
@@ -67,12 +72,6 @@ const sortApps = (apps: NucleusApp[]) => {
   return apps.sort((a, b) => a.name.localeCompare(b.name));
 };
 
-const runHooks = (app: NucleusApp, runner: (hook: WebHook) => void) => {
-  for (const rawHook of app.webHooks) {
-    runner(WebHook.fromNucleusHook(app, rawHook));
-  }
-};
-
 router.get('/', requireLogin, a(async (req, res) => {
   d('Listing applications');
   res.json(onlyPermission(req, sortApps(await driver.getApps())));
@@ -111,7 +110,7 @@ router.post('/', requireLogin, noPendingMigrations, upload.single('icon'), a(asy
 }));
 
 router.use('/:id', a(async (req, res, next) => {
-  const app = await driver.getApp(req.params.id);
+  const app = await driver.getApp(param(req.params.id));
   if (!app) {
     res.status(404).json({
       error: 'App not found',
@@ -178,7 +177,7 @@ router.post('/:id/team', requireLogin, noPendingMigrations, a(async (req, res) =
     } catch {
       return res.status(400).json({ error: 'Provided parameter "team" is not valid JSON' });
     }
-    if (Array.isArray(team) && team.length > 0 && team.indexOf(req.user.id) !== -1) {
+    if (Array.isArray(team) && team.length > 0 && req.user && team.indexOf(req.user.id) !== -1) {
       d(`Updating team for app: '${req.targetApp.name}' to be: [${team.join(', ')}]`);
       res.json(await driver.setTeam(req.targetApp, team));
     } else {
@@ -186,38 +185,6 @@ router.post('/:id/team', requireLogin, noPendingMigrations, a(async (req, res) =
       res.status(400).json({ error: 'Bad team' });
     }
   }
-}));
-
-router.post('/:id/webhook', requireLogin, noPendingMigrations, a(async (req, res) => {
-  if (stopNoPerms(req, res)) return;
-  if (checkFields(req, res, ['url', 'secret'])) {
-    if (typeof req.body.url !== 'string' ||
-        (!req.body.url.startsWith('https://') && !req.body.url.startsWith('http://')) ||
-        req.body.url.startsWith('http://localhost') || req.body.url.startsWith('http://127.0.0.1')) {
-      return res.status(400).json({ error: 'Invalid URL provided' });
-    }
-    d(`Creating new WebHook: '${req.body.url}' for app: '${req.targetApp.slug}'`);
-    const rawHook = await driver.createWebHook(req.targetApp, req.body.url, req.body.secret);
-    const hook = WebHook.fromNucleusHook(req.targetApp, rawHook);
-    const success = await hook.register();
-    res.json({
-      success,
-      hook: await driver.getWebHook(req.targetApp, rawHook.id),
-    });
-  }
-}));
-
-router.delete('/:id/webhook/:webHookId', requireLogin, noPendingMigrations, a(async (req, res) => {
-  if (stopNoPerms(req, res)) return;
-  d(`Deleting WebHook: '${req.params.webHookId}' for app: '${req.targetApp.slug}'`);
-  const rawHook = await driver.getWebHook(req.targetApp, req.params.webHookId);
-  if (!rawHook) return res.status(404).json({ error: 'Not Found' });
-  const hook = WebHook.fromNucleusHook(req.targetApp, rawHook);
-  await hook.unregister();
-  await driver.deleteWebHook(req.targetApp, req.params.webHookId);
-  res.json({
-    success: true,
-  });
 }));
 
 router.post('/:id/channel', requireLogin, noPendingMigrations, a(async (req, res) => {
@@ -228,13 +195,12 @@ router.post('/:id/channel', requireLogin, noPendingMigrations, a(async (req, res
     const positioner = new Positioner(store);
     await positioner.initializeStructure(req.targetApp, channel);
     res.json(channel);
-    runHooks(req.targetApp, hook => hook.newChannel(channel));
   }
 }));
 
 router.get('/:id/channel/:channelId/temporary_releases', requireLogin, a(async (req, res) => {
   if (stopNoPerms(req, res)) return;
-  const channel = await driver.getChannel(req.targetApp, req.params.channelId);
+  const channel = await driver.getChannel(req.targetApp, param(req.params.channelId));
   if (!channel) {
     return res.status(404).json({
       error: 'Channel not found',
@@ -246,63 +212,57 @@ router.get('/:id/channel/:channelId/temporary_releases', requireLogin, a(async (
 
 router.get('/:id/channel/:channelId/temporary_releases/:temporarySaveId/:fileName', requireLogin, a(async (req, res) => {
   if (stopNoPerms(req, res)) return;
-  const channel = await driver.getChannel(req.targetApp, req.params.channelId);
+  const channel = await driver.getChannel(req.targetApp, param(req.params.channelId));
   if (!channel) {
     return res.status(404).json({
       error: 'Channel not found',
     });
   }
-  const save = await driver.getTemporarySave(req.params.temporarySaveId);
+  const save = await driver.getTemporarySave(param(req.params.temporarySaveId));
   if (!save) {
     return res.status(404).json({
       error: 'That temporary save was not found',
     });
   }
-  if (!save.filenames.some(fileName => fileName === req.params.fileName)) {
+  if (!save.filenames.some(fileName => fileName === param(req.params.fileName))) {
     return res.status(404).json({
       error: 'That fileName could not be found in that temporarySave',
     });
   }
 
-  d(`User ${req.user ? req.user.id : "none"} or token (${(req.headers.authorization || "none").substring(0, 4)}...) requested an unencrypted version of a preRelease file: (${req.targetApp.slug}, ${save.version}, ${req.params.fileName})`);
+  d(`User ${req.user ? req.user.id : "none"} or token (${(req.headers.authorization || "none").substring(0, 4)}...) requested an unencrypted version of a preRelease file: (${req.targetApp.slug}, ${save.version}, ${param(req.params.fileName)})`);
   const positioner = new Positioner(store);
-  const data = await positioner.getTemporaryFile(req.targetApp, save.saveString, req.params.fileName, save.cipherPassword);
-  res.setHeader('Content-disposition', `attachment; filename=${req.params.fileName}`);
+  const data = await positioner.getTemporaryFile(req.targetApp, save.saveString, param(req.params.fileName), save.cipherPassword);
+  res.setHeader('Content-disposition', `attachment; filename=${param(req.params.fileName)}`);
   res.status(200).write(data);
   res.send();
 }));
 
 router.post('/:id/channel/:channelId/temporary_releases/:temporarySaveId/release', requireLogin, noPendingMigrations, a(async (req, res) => {
   if (stopNoPerms(req, res)) return;
-  const channel = await driver.getChannel(req.targetApp, req.params.channelId);
+  const channel = await driver.getChannel(req.targetApp, param(req.params.channelId));
   if (!channel) {
     return res.status(404).json({
       error: 'Channel not found',
     });
   }
-  const save = await driver.getTemporarySave(req.params.temporarySaveId);
+  const save = await driver.getTemporarySave(param(req.params.temporarySaveId));
   if (!save) {
     return res.status(404).json({
       error: 'That temporary save was not found',
     });
   }
 
-  let versionExists = false;
-  for (const version of channel.versions) {
-    if (version.name === save.version) versionExists = true;
-  }
-
   const positioner = new Positioner(store);
-  let storedFileNames: string[];
 
   if (!(await positioner.withLock(req.targetApp, async (lock) => {
     d(`User ${req.user ? req.user.id : "none"} or token (${(req.headers.authorization || "none").substring(0, 4)}...) promoted a temporary release for app: '${req.targetApp.slug}' on channel: ${channel.name} becomes version: ${save.version}`);
 
-    storedFileNames = await driver.registerVersionFiles(save);
+    const storedFileNames = await driver.registerVersionFiles(save);
     d(`Tested files: [${save.filenames.join(', ')}] but stored: [${storedFileNames.join(', ')}]`);
 
     // Get up to date channel
-    const upToDateChannel = (await driver.getChannel(req.targetApp, req.params.channelId))!;
+    const upToDateChannel = (await driver.getChannel(req.targetApp, param(req.params.channelId)))!;
     const storedVersion = upToDateChannel.versions.find(v => v.name === save.version)!;
     const storedFiles = storedVersion.files.filter(f => storedFileNames.includes(f.fileName) && f.arch === save.arch && f.platform === save.platform);
 
@@ -340,27 +300,17 @@ router.post('/:id/channel/:channelId/temporary_releases/:temporarySaveId/release
   }
 
   res.json({ success: true });
-
-  // Run hooks after sending response
-  const updatedChannel = await driver.getChannel(req.targetApp, channel.id!);
-  if (!updatedChannel) return res.status(400).json({ error: 'Bad channel' });
-  const version = updatedChannel.versions.find(version => version.name === save.version);
-  if (!version) return;
-  if (!versionExists) runHooks(req.targetApp, hook => hook.newVersion(updatedChannel, version));
-  if (storedFileNames!.length > 0) {
-    runHooks(req.targetApp, hook => hook.newVersionFile(updatedChannel, version));
-  }
 }));
 
 router.post('/:id/channel/:channelId/temporary_releases/:temporarySaveId/delete', requireLogin, noPendingMigrations, a(async (req, res) => {
   if (stopNoPerms(req, res)) return;
-  const channel = await driver.getChannel(req.targetApp, req.params.channelId);
+  const channel = await driver.getChannel(req.targetApp, param(req.params.channelId));
   if (!channel) {
     return res.status(404).json({
       error: 'Channel not found',
     });
   }
-  const save = await driver.getTemporarySave(req.params.temporarySaveId);
+  const save = await driver.getTemporarySave(param(req.params.temporarySaveId));
   if (!save) {
     return res.status(404).json({
       error: 'That temporary save was not found',
@@ -381,7 +331,7 @@ router.post('/:id/channel/:channelId/temporary_releases/:temporarySaveId/delete'
 
 router.post('/:id/channel/:channelId/dead', requireLogin, noPendingMigrations, a(async (req, res) => {
   if (stopNoPerms(req, res)) return;
-  const channel = await driver.getChannel(req.targetApp, req.params.channelId);
+  const channel = await driver.getChannel(req.targetApp, param(req.params.channelId));
   if (!channel) {
     return res.status(404).json({
       error: 'Channel not found',
@@ -414,7 +364,7 @@ router.post('/:id/channel/:channelId/dead', requireLogin, noPendingMigrations, a
 router.get('/:id/channel/:channelId/invalidate-cache', a(async (req, res) => {
   if (stopNoPerms(req, res)) return;
 
-  const channel = await driver.getChannel(req.targetApp, req.params.channelId);
+  const channel = await driver.getChannel(req.targetApp, param(req.params.channelId));
   if (!channel) {
     return res.status(404).json({
       error: 'Channel not found',
@@ -437,7 +387,7 @@ router.get('/:id/channel/:channelId/invalidate-cache', a(async (req, res) => {
 
 router.post('/:id/channel/:channelId/rollout', requireLogin, noPendingMigrations, a(async (req, res) => {
   if (stopNoPerms(req, res)) return;
-  const channel = await driver.getChannel(req.targetApp, req.params.channelId);
+  const channel = await driver.getChannel(req.targetApp, param(req.params.channelId));
   if (!channel) {
     return res.status(404).json({
       error: 'Channel not found',
@@ -489,7 +439,7 @@ router.post('/:id/channel/:channelId/upload', noPendingMigrations, upload.any(),
       });
     }
     if (['darwin', 'linux', 'win32'].indexOf(req.body.platform) !== -1) {
-      const channel = await driver.getChannel(req.targetApp, req.params.channelId);
+      const channel = await driver.getChannel(req.targetApp, param(req.params.channelId));
       if (!channel) {
         return res.status(404).json({
           error: 'Could not find provided channel',

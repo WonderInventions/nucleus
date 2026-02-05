@@ -1,4 +1,4 @@
-import * as fs from 'fs-extra';
+import * as fs from 'fs/promises';
 import * as path from 'path';
 
 export const syncDirectoryToStore = async (store: IFileStore, keyPrefix: string, localBaseDir: string, relative: string = '.') => {
@@ -20,7 +20,7 @@ export const syncStoreToDirectory = async (store: IFileStore, keyPrefix: string,
   for (const key of await store.listFiles(keyPrefix)) {
     const relativeKey = key.substr(keyPrefix.length + 1);
     const localPath = path.resolve(localDir, relativeKey);
-    await fs.mkdirs(path.dirname(localPath));
+    await fs.mkdir(path.dirname(localPath), { recursive: true });
     await fs.writeFile(
       localPath,
       await store.getFile(key),

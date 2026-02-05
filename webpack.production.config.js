@@ -1,46 +1,49 @@
 const webpack = require('webpack');
 
-const ExtractTextPlugin = require('extract-text-webpack-plugin');
-const WebpackCleanupPlugin = require('webpack-cleanup-plugin');
+const MiniCssExtractPlugin = require('mini-css-extract-plugin');
+const TerserPlugin = require('terser-webpack-plugin');
 
 const config = require('./webpack.config');
 
-// Remove React Hot Loader Patch
-config.entry.shift();
-
 // Hash all JS assets
-config.output.filename = 'core.[chunkhash].min.js';
+config.output.filename = 'core.[contenthash].min.js';
 
 // Remove devServer config
 delete config.devServer;
 
-// Remove NoEmitOnErrors, HotModuleReplacement and Dashboard plugins
-config.plugins.shift();
-config.plugins.shift();
-config.plugins.shift();
+// Remove HotModuleReplacement plugin
+config.plugins = config.plugins.filter(p => !(p instanceof webpack.HotModuleReplacementPlugin));
 
 // Remove source mapping
 config.devtool = false;
 
+// Set mode
+config.mode = 'production';
+
+// Add optimization
+config.optimization = {
+  minimize: true,
+  minimizer: [
+    new TerserPlugin({
+      terserOptions: {
+        compress: {
+          drop_console: true,
+          drop_debugger: true,
+        },
+      },
+    }),
+  ],
+};
+
 // Add production plugins
 config.plugins.unshift(
-  new WebpackCleanupPlugin(),
   new webpack.DefinePlugin({
     'process.env': {
       NODE_ENV: '"production"',
     },
   }),
-  new webpack.optimize.UglifyJsPlugin({
-    compress: {
-      warnings: false,
-      screw_ie8: true,
-      drop_console: true,
-      drop_debugger: true,
-    },
-  }),
-  new ExtractTextPlugin({
+  new MiniCssExtractPlugin({
     filename: '[contenthash].css',
-    allChunks: true,
   }));
 
 module.exports = config;

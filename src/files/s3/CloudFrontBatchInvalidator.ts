@@ -1,10 +1,9 @@
-import * as AWS from 'aws-sdk';
-import * as debug from 'debug';
+import { randomUUID } from 'crypto';
+import { CloudFrontClient, CreateInvalidationCommand } from '@aws-sdk/client-cloudfront';
+import debug from 'debug';
 
 import S3Store from './S3Store';
 import * as config from '../../config';
-
-const hat = require('hat');
 
 const d = debug('nucleus:s3:cloudfront-invalidator');
 
@@ -17,7 +16,7 @@ const INVALIDATE_PER_ATTEMPT = 500;
 export class CloudFrontBatchInvalidator {
   private lastAdd: number = 0;
   private queue: string[] = [];
-  nextTimer: NodeJS.Timer;
+  nextTimer: ReturnType<typeof setTimeout>;
 
   static noopInvalidator = new CloudFrontBatchInvalidator(null);
 
@@ -50,7 +49,7 @@ export class CloudFrontBatchInvalidator {
     this.nextTimer = setTimeout(() => this.runJob(), 30000);
   }
 
-  runJob() {
+  async runJob() {
     if (this.queue.length === 0 || Date.now() - this.lastAdd <= 20000) {
       return this.queueUp();
     }
@@ -59,34 +58,34 @@ export class CloudFrontBatchInvalidator {
     this.queue = this.queue.slice(INVALIDATE_PER_ATTEMPT);
 
     const cloudFront = this.getCloudFront();
-    cloudFront.createInvalidation({
-      DistributionId: this.cloudfrontConfig!.distributionId,
-      InvalidationBatch: {
-        CallerReference: hat(),
-        Paths: {
-          Quantity: itemsToUse.length,
-          Items: itemsToUse,
+    try {
+      await cloudFront.send(new CreateInvalidationCommand({
+        DistributionId: this.cloudfrontConfig!.distributionId,
+        InvalidationBatch: {
+          CallerReference: randomUUID(),
+          Paths: {
+            Quantity: itemsToUse.length,
+            Items: itemsToUse,
+          },
         },
-      },
-    }, (err, invalidateInfo) => {
-      if (err) {
-        console.error(JSON.stringify({
-          err,
-          message: 'Failed to invalidate',
-          keys: itemsToUse,
-        }));
-        this.queue.push(...itemsToUse);
-      } else {
-        d('batch invalidation succeeded, moving along');
-      }
-      this.queueUp();
-    });
+      }));
+      d('batch invalidation succeeded, moving along');
+    } catch (err) {
+      console.error(JSON.stringify({
+        err,
+        message: 'Failed to invalidate',
+        keys: itemsToUse,
+      }));
+      this.queue.push(...itemsToUse);
+    }
+    this.queueUp();
   }
 
-  private getCloudFront() {
-    if (config.s3.init) {
-      return new AWS.CloudFront(config.s3.init);
+  private getCloudFront(): CloudFrontClient {
+    const options: ConstructorParameters<typeof CloudFrontClient>[0] = {};
+    if (config.s3.init && config.s3.init.endpoint) {
+      options.endpoint = config.s3.init.endpoint;
     }
-    return new AWS.CloudFront();
+    return new CloudFrontClient(options);
   }
 }

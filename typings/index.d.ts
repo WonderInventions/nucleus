@@ -3,15 +3,6 @@ interface GitHubOptions {
   clientSecret: string;
 }
 
-interface OpenIDOptions {
-  realm: string;
-  providerURL: string;
-  stateless: boolean;
-  profile: boolean;
-  domain: string;
-  photoResolver: (email: string) => string;
-}
-
 interface S3Options {
   init?: {
     endpoint?: string;
@@ -41,38 +32,19 @@ interface SequelizeOptions {
   storage: string;
 }
 
-interface LocalUser {
-  username: string;
-  password: string;
-  photo: string;
-  displayName: string;
-}
-
-type LocalAuthOptions = LocalUser[];
-
 interface SessionConfig {
-  type: 'redis' | null;
   secret: string;
-
-  redis?: {
-    host: string;
-    port: number;
-  }
 }
 
 interface IConfig {
   port: number;
   baseURL: string;
-  fileStrategy: string;
-  dbStrategy: string;
-  authStrategy: string;
+  fileStrategy?: string;
   github: GitHubOptions;
-  openid: OpenIDOptions;
   adminIdentifiers: string[];
   s3: S3Options;
-  local: LocalOptions;
+  local?: LocalOptions;
   sequelize: SequelizeOptions;
-  localAuth: LocalAuthOptions;
   sessionConfig: SessionConfig;
   organization?: string;
   gpgSigningKey: string;
@@ -104,22 +76,6 @@ interface NucleusApp {
   token: string;
   channels: NucleusChannel[];
   team: UserID[];
-  webHooks: NucleusWebHook[];
-}
-
-interface NucleusWebHook {
-  id: number;
-  url: string;
-  secret: string;
-  registered: boolean;
-  errors: NucleusWebHookError[]
-}
-
-interface NucleusWebHookError {
-  id: number;
-  message: string;
-  responseCode: number;
-  responseBody: string;
 }
 
 interface NucleusChannel {
@@ -186,6 +142,13 @@ interface HashSet {
 }
 
 declare namespace Express {
+  interface User {
+    id: string;
+    displayName: string;
+    photos?: { value: string }[];
+    isAdmin: boolean;
+  }
+
   interface Response {
     error(err: IErrorObject): void;
     download(path: string): void;

@@ -1,5 +1,5 @@
-import * as debug from 'debug';
-import * as express from 'express';
+import debug from 'debug';
+import express from 'express';
 
 import driver from '../db/driver';
 
@@ -15,7 +15,7 @@ export const requireLogin: express.RequestHandler = (req, res, next) => {
 
 export const requireAdmin: express.RequestHandler = (req, res, next) => {
   return requireLogin(req, res, () => {
-    if (!req.user.isAdmin) {
+    if (!req.user || !req.user.isAdmin) {
       d(`Non admin user attempted to access: ${req.url}`);
       return res.status(403).json({ error: 'Forbidden' });
     }

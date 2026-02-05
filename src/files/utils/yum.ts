@@ -1,7 +1,7 @@
 import * as cp from 'child-process-promise';
-import * as fs from 'fs-extra';
+import * as fs from 'fs/promises';
 import * as path from 'path';
-import * as debug from 'debug';
+import debug from 'debug';
 
 import { spawnPromiseAndCapture, escapeShellArguments } from './spawn';
 import { syncDirectoryToStore } from './sync';
@@ -9,6 +9,15 @@ import { withTmpDir } from './tmp';
 import * as config from '../../config';
 
 const d = debug(`nucleus:files:yum`);
+
+const pathExists = async (p: string): Promise<boolean> => {
+  try {
+    await fs.access(p);
+    return true;
+  } catch {
+    return false;
+  }
+};
 
 const getCreateRepoCommand = (dir: string, args: string[]): [string, string[]] => {
   if (process.platform === 'linux') {
@@ -33,11 +42,11 @@ const getSignRpmCommand = (dir: string, args: string[]): [string, string[]] => {
 
 const createRepoFile = async (store: IFileStore, app: NucleusApp, channel: NucleusChannel) => {
   await store.putFile(
-    path.posix.join(app.slug, channel.id, 'linux', `${app.slug}.repo`),
+    path.posix.join(app.slug, channel.id!, 'linux', `${app.slug}.repo`),
     Buffer.from(
 `[packages]
 name=${app.name} Packages
-baseurl=${await store.getPublicBaseUrl()}/${app.slug}/${channel.id}/linux/redhat
+baseurl=${await store.getPublicBaseUrl()}/${app.slug}/${channel.id!}/linux/redhat
 enabled=1
 gpgcheck=1`,
     ),
@@ -49,7 +58,7 @@ const signRpm = async (rpm: string) => {
   await withTmpDir(async (tmpDir) => {
     const fileName = path.basename(rpm);
     const tmpFile = path.resolve(tmpDir, fileName);
-    await fs.copy(rpm, tmpFile);
+    await fs.copyFile(rpm, tmpFile);
     // Import GPG key
     const key = path.resolve(tmpDir, 'key.asc');
     await fs.writeFile(key, config.gpgSigningKey);
@@ -73,9 +82,7 @@ const signRpm = async (rpm: string) => {
       throw signError;
     }
     // Done signing
-    await fs.copy(tmpFile, rpm, {
-      overwrite: true,
-    });
+    await fs.copyFile(tmpFile, rpm);
   });
 };
 
@@ -97,7 +104,7 @@ export const initializeYumRepo = async (store: IFileStore, app: NucleusApp, chan
     });
     await syncDirectoryToStore(
       store,
-      path.posix.join(app.slug, channel.id, 'linux', 'redhat'),
+      path.posix.join(app.slug, channel.id!, 'linux', 'redhat'),
       tmpDir,
     );
     await createRepoFile(store, app, channel);
@@ -112,9 +119,9 @@ export const addFileToYumRepo = async (store: IFileStore, {
   fileData,
 }: HandlePlatformUploadOpts) => {
   await withTmpDir(async (tmpDir) => {
-    const storeKey = path.posix.join(app.slug, channel.id, 'linux', 'redhat');
+    const storeKey = path.posix.join(app.slug, channel.id!, 'linux', 'redhat');
     // Copy the XML files in repodata/
-    await fs.mkdir(`${tmpDir}/repodata`);
+    await fs.mkdir(`${tmpDir}/repodata`, { recursive: true });
     // Copy the RPMs
     for (const version of channel.versions) {
       if (!version.dead) {
@@ -128,7 +135,7 @@ export const addFileToYumRepo = async (store: IFileStore, {
       }
     }
     const binaryPath = path.resolve(tmpDir, `${internalVersion.name}-${file.fileName}`);
-    if (await fs.pathExists(binaryPath)) {
+    if (await pathExists(binaryPath)) {
       throw new Error('Uploaded a duplicate file');
     }
     await fs.writeFile(binaryPath, fileData);

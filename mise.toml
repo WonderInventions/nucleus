@@ -2,3 +2,5 @@ min_version = "2026.1.2"
 
 [tools]
 aws-cli = "2.32.23"
+node = "24"
+yarn = "1.22.22"

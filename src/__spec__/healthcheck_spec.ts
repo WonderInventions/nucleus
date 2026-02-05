@@ -1,11 +1,12 @@
-import * as chai from 'chai';
+import { describe, it, before, after } from 'node:test';
+import * as assert from 'node:assert/strict';
 
 import * as helpers from './_helpers';
 
-const { expect } = chai;
-
 describe('healthcheck endpoints', () => {
-  before(helpers.startTestNucleus);
+  before(async () => {
+    await helpers.startTestNucleus();
+  });
 
   describe('/healthcheck', () => {
     describe('GET', () => {
@@ -14,16 +15,15 @@ describe('healthcheck endpoints', () => {
           .get('/healthcheck')
           .send();
 
-        expect(response).to.have.status(200);
+        assert.strictEqual(response.status, 200);
       });
 
       it('should response with a JSON body', async () => {
         const response = await helpers.request
           .get('/healthcheck')
           .send();
-        
-        expect(response).to.be.json;
-        expect(response.body).to.deep.equal({ alive: true });
+
+        assert.deepStrictEqual(response.body, { alive: true });
       });
     });
   });
@@ -34,20 +34,21 @@ describe('healthcheck endpoints', () => {
         const response = await helpers.request
           .get('/deepcheck')
           .send();
-        
-        expect(response).to.have.status(200);
+
+        assert.strictEqual(response.status, 200);
       });
 
       it('should respond with a JSON body', async () => {
         const response = await helpers.request
           .get('/deepcheck')
           .send();
-        
-        expect(response).to.be.json;
-        expect(response.body).to.deep.equal({ alive: true });
+
+        assert.deepStrictEqual(response.body, { alive: true });
       });
     });
   });
 
-  after(helpers.stopTestNucleus);
+  after(async () => {
+    await helpers.stopTestNucleus();
+  });
 });

@@ -1,19 +1,22 @@
 {
-	"compilerOptions": {
-		"module": "commonjs",
-		"target": "es5",
-		"outDir": "lib",
-		"lib": [
-			"es6",
-			"dom"
-		],
-		"sourceMap": true,
-		"rootDir": "public",
-		"jsx": "react",
-		"experimentalDecorators": true
-	},
-	"exclude": [
-		"node_modules",
-		"src"
-	]
+  "compilerOptions": {
+    "module": "ES2022",
+    "target": "ES2022",
+    "outDir": "lib",
+    "lib": [
+      "ES2022",
+      "dom"
+    ],
+    "sourceMap": true,
+    "rootDir": "public",
+    "jsx": "react",
+    "experimentalDecorators": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "moduleResolution": "node"
+  },
+  "exclude": [
+    "node_modules",
+    "src"
+  ]
 }

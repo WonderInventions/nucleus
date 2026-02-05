@@ -1,248 +1,204 @@
 import { Table, Column, Model, HasMany, Unique, BelongsTo, Sequelize, DataType, ForeignKey } from 'sequelize-typescript';
+import { Op, QueryInterface } from 'sequelize';
 
-import * as debug from 'debug';
+import debug from 'debug';
 
 import * as config from '../../../config';
-import { QueryInterface } from 'sequelize';
 
 @Table
-export class App extends Model<App> {
+export class App extends Model {
   @Column(DataType.STRING)
-  name: string;
+  declare name: string;
 
   @Column(DataType.STRING)
-  slug: string;
+  declare slug: string;
 
   @Column(DataType.STRING)
-  token: string;
+  declare token: string;
 
   @HasMany(() => TeamMember)
-  team: TeamMember[];
+  declare team: TeamMember[];
 
   @HasMany(() => Channel)
-  channels: Channel[];
-
-  @HasMany(() => WebHook)
-  webHooks: WebHook[];
+  declare channels: Channel[];
 }
 
 @Table
-export class WebHook extends Model<WebHook> {
+export class TeamMember extends Model {
   @Column(DataType.STRING)
-  url: string;
-
-  @Column(DataType.STRING)
-  secret: string;
-
-  @Column(DataType.BOOLEAN)
-  registered: boolean;
+  declare userId: string;
 
   @ForeignKey(() => App)
   @Column(DataType.INTEGER)
-  appId: number;
+  declare appId: number;
 
   @BelongsTo(() => App)
-  app: App;
-
-  @HasMany(() => WebHookError)
-  errors: WebHookError[];
+  declare app: App;
 }
 
 @Table
-export class WebHookError extends Model<WebHookError> {
-  @Column(DataType.STRING(1000))
-  message: string;
-
-  @Column(DataType.INTEGER)
-  responseCode: number;
-
-  @Column(DataType.STRING(10000))
-  responseBody: string;
-
-  @ForeignKey(() => WebHook)
-  @Column(DataType.INTEGER)
-  webHookId: number;
-
-  @BelongsTo(() => WebHook)
-  webHook: WebHook;
-}
-
-@Table
-export class TeamMember extends Model<TeamMember> {
-  @Column(DataType.STRING)
-  userId: string;
-
-  @ForeignKey(() => App)
-  @Column(DataType.INTEGER)
-  appId: number;
-
-  @BelongsTo(() => App)
-  app: App;
-}
-
-@Table
-export class Channel extends Model<Channel> {
+export class Channel extends Model {
   @Unique
   @Column(DataType.STRING)
-  stringId: string;
+  declare stringId: string;
 
   @Column(DataType.STRING)
-  name: string;
+  declare name: string;
 
   @ForeignKey(() => App)
   @Column(DataType.INTEGER)
-  appId: number;
+  declare appId: number;
 
   @BelongsTo(() => App)
-  app: App;
+  declare app: App;
 
   @HasMany(() => Version)
-  versions: Version[];
+  declare versions: Version[];
 
   @HasMany(() => TemporarySave)
-  temporarySaves: TemporarySave[];
+  declare temporarySaves: TemporarySave[];
 }
-// version: string, filenames: string[], arch: string, platform: NucleusPlatform// 
+// version: string, filenames: string[], arch: string, platform: NucleusPlatform//
 @Table
-export class TemporarySave extends Model<TemporarySave> {
+export class TemporarySave extends Model {
   @Unique
   @Column(DataType.STRING)
-  saveString: string;
+  declare saveString: string;
+
+  @Column({ type: DataType.STRING, field: 'version' })
+  declare version: string;
 
   @Column(DataType.STRING)
-  version: string;
+  declare arch: string;
 
   @Column(DataType.STRING)
-  arch: string;
-
-  @Column(DataType.STRING)
-  platform: string;
+  declare platform: string;
 
   @Column(DataType.DATE)
-  date: Date;
+  declare date: Date;
 
   @Column(DataType.STRING)
-  cipherPassword: string;
+  declare cipherPassword: string;
 
   @ForeignKey(() => Channel)
   @Column(DataType.INTEGER)
-  channelId: number;
+  declare channelId: number;
 
   @BelongsTo(() => Channel)
-  channel: Channel;
+  declare channel: Channel;
 
   @HasMany(() => TemporarySaveFile)
-  files: TemporarySaveFile[];
+  declare files: TemporarySaveFile[];
 }
 
 @Table
-export class TemporarySaveFile extends Model<TemporarySaveFile> {
+export class TemporarySaveFile extends Model {
   @Column(DataType.STRING)
-  name: string;
+  declare name: string;
 
   @ForeignKey(() => TemporarySave)
   @Column(DataType.INTEGER)
-  temporarySaveId: number;
+  declare temporarySaveId: number;
 
   @BelongsTo(() => TemporarySave)
-  temporarySave: TemporarySave;
+  declare temporarySave: TemporarySave;
 }
 
 @Table
-export class Version extends Model<Version> {
+export class Version extends Model {
   @Column(DataType.STRING)
-  name: string;
+  declare name: string;
 
   @Column(DataType.BOOLEAN)
-  dead: boolean;
+  declare dead: boolean;
 
   @Column(DataType.INTEGER)
-  rollout: number;
+  declare rollout: number;
 
   @ForeignKey(() => Channel)
   @Column(DataType.INTEGER)
-  channelId: number;
+  declare channelId: number;
 
   @BelongsTo(() => Channel)
-  channel: Channel;
+  declare channel: Channel;
 
   @HasMany(() => File)
-  files: File[];
+  declare files: File[];
 }
 
 @Table
-export class File extends Model<File> {
+export class File extends Model {
   @Column(DataType.STRING)
-  fileName: string;
+  declare fileName: string;
 
   @Column(DataType.STRING)
-  platform: string;
+  declare platform: string;
 
   @Column(DataType.STRING)
-  arch: string;
+  declare arch: string;
 
   @Column(DataType.STRING)
-  type: string;
+  declare type: string;
 
   @Column(DataType.STRING({ length: 40 }))
-  sha1: string;
+  declare sha1: string;
 
   @Column(DataType.STRING({ length: 64 }))
-  sha256: string;
+  declare sha256: string;
 
   @ForeignKey(() => Version)
   @Column(DataType.INTEGER)
-  versionId: number;
+  declare versionId: number;
 
   @BelongsTo(() => Version)
-  version: Version;
+  declare versionRef: Version;
 }
 
 @Table
-export class Migration extends Model<Migration> implements NucleusMigration {
+export class Migration extends Model implements NucleusMigration {
   @Column(DataType.STRING)
-  key: string;
+  declare key: string;
 
   @Column(DataType.STRING)
-  friendlyName: string;
+  declare friendlyName: string;
 
   @Column(DataType.BOOLEAN)
-  complete: boolean;
+  declare complete: boolean;
 }
 
 const d = debug('nucleus:db:migrator');
 
 function createAddColumnMigration<T>(columnName: string, table: typeof Model, defaultValue: T) {
   return async function addColumnToTable(queryInterface: QueryInterface) {
-    const description = await queryInterface.describeTable(table.getTableName());
+    const description = await queryInterface.describeTable((table as any).getTableName());
     if (Object.keys(description).indexOf(columnName) === -1) {
-      await queryInterface.addColumn(table.getTableName() as string, columnName, {
-        type: (table as any).attributes[columnName].type,
+      await queryInterface.addColumn((table as any).getTableName() as string, columnName, {
+        type: (table as any).rawAttributes[columnName].type,
       });
-      await table.update({
+      await (table as any).update({
         [columnName]: defaultValue,
       }, {
         where: {
           [columnName]: {
-            $eq: null,
+            [Op.eq]: null,
           },
         },
       });
-      d(`adding the ${columnName} column to the ${table.getTableName()} table`);
+      d(`adding the ${columnName} column to the ${(table as any).getTableName()} table`);
     }
   };
 }
 
 const upwardsMigrations: ((queryInterface: QueryInterface) => Promise<void>)[] = [
-  createAddColumnMigration('rollout', Version, 100),
-  createAddColumnMigration('sha1', File, ''),
-  createAddColumnMigration('sha256', File, ''),
+  createAddColumnMigration('rollout', Version as unknown as typeof Model, 100),
+  createAddColumnMigration('sha1', File as unknown as typeof Model, ''),
+  createAddColumnMigration('sha256', File as unknown as typeof Model, ''),
 ];
 
 export default async function () {
   const sequelize = new Sequelize({
     database: config.sequelize.database,
-    dialect: config.sequelize.dialect,
+    dialect: config.sequelize.dialect as any,
     username: config.sequelize.username,
     password: config.sequelize.password,
     host: config.sequelize.host,
@@ -259,8 +215,6 @@ export default async function () {
     App,
     TemporarySave,
     TemporarySaveFile,
-    WebHook,
-    WebHookError,
     Migration,
   ]);
 

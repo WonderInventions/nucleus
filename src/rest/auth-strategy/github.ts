@@ -1,4 +1,4 @@
-import * as passport from 'passport';
+import passport from 'passport';
 import { Strategy as GitHubStrategy } from 'passport-github';
 
 import { baseURL, github, adminIdentifiers } from '../../config';

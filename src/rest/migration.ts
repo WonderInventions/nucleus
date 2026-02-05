@@ -1,5 +1,5 @@
-import * as debug from 'debug';
-import * as express from 'express';
+import debug from 'debug';
+import express from 'express';
 
 import driver from '../db/driver';
 import { createA } from '../utils/a';
@@ -7,20 +7,26 @@ import BaseMigration, { MigrationStore } from '../migrations/BaseMigration';
 
 import { requireAdmin } from './_helpers';
 
+// Helper to extract string from Express 5 params (can be string | string[])
+const param = (value: string | string[] | undefined): string => {
+  if (Array.isArray(value)) return value[0] || '';
+  return value || '';
+};
+
 const d = debug('nucleus:rest:migrations');
 const a = createA(d);
 
 const migrationRouter = express();
 
 migrationRouter.use('/:key', requireAdmin, a(async (req, res, next) => {
-  const migration = MigrationStore.get(req.params.key);
+  const migration = MigrationStore.get(param(req.params.key));
   if (!migration) {
     return res.status(404).json({
       error: 'Migration with provided key is not found',
     });
   }
   req.migration = {
-    internal: (await driver.getMigrations()).find(m => m.key === req.params.key)!,
+    internal: (await driver.getMigrations()).find(m => m.key === param(req.params.key))!,
     migrator: migration,
   };
   next();

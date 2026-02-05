@@ -1,17 +1,26 @@
 import * as cp from 'child-process-promise';
-import * as fs from 'fs-extra';
+import * as fs from 'fs/promises';
 import * as path from 'path';
 
 import { spawnPromiseAndCapture } from './spawn';
 import { withTmpDir } from './tmp';
 import * as config from '../../config';
 
+const pathExists = async (p: string): Promise<boolean> => {
+  try {
+    await fs.access(p);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
 export const gpgSign = async (file: string, out: string) => {
   await withTmpDir(async (tmpDir) => {
     const key = path.resolve(tmpDir, 'key.asc');
     await fs.writeFile(key, config.gpgSigningKey);
     const [stdout, stderr] = await spawnPromiseAndCapture('gpg', ['--import', key]);
-    try { await fs.remove(out); } catch (err) {}
+    try { await fs.rm(out, { force: true }); } catch (err) {}
     const keyImport = stdout.toString() + '--' + stderr.toString();
     const keyMatch = keyImport.match(/ key ([A-Za-z0-9]+):/);
     if (!keyMatch || !keyMatch[1]) {
@@ -30,7 +39,7 @@ export const gpgSignInline = async (file: string, out: string) => {
     const key = path.resolve(tmpDir, 'key.asc');
     await fs.writeFile(key, config.gpgSigningKey);
     const [stdout, stderr] = await spawnPromiseAndCapture('gpg', ['--import', key]);
-    try { await fs.remove(out); } catch (err) {}
+    try { await fs.rm(out, { force: true }); } catch (err) {}
     const keyImport = stdout.toString() + '--' + stderr.toString();
     const keyMatch = keyImport.match(/ key ([A-Za-z0-9]+):/);
     if (!keyMatch || !keyMatch[1]) {
@@ -53,6 +62,6 @@ export const isGpgKeyValid = async () => {
     } catch (err) {
       return false;
     }
-    return await fs.pathExists(outFile);
+    return await pathExists(outFile);
   });
 };

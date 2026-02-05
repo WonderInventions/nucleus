@@ -2,7 +2,6 @@ const path = require('path');
 const webpack = require('webpack');
 
 const {BundleAnalyzerPlugin} = require('webpack-bundle-analyzer');
-const DashboardPlugin = require('webpack-dashboard/plugin');
 const FaviconsWebpackPlugin = require('favicons-webpack-plugin');
 const HtmlWebpackPlugin = require('html-webpack-plugin');
 
@@ -20,7 +19,6 @@ try {
 
 module.exports = {
   entry: [
-    'react-hot-loader/patch',
     './public/index.tsx',
   ],
   devtool: process.env.WEBPACK_DEVTOOL || 'eval-source-map',
@@ -33,35 +31,32 @@ module.exports = {
     extensions: ['.ts', '.tsx', '.js', '.jsx'],
   },
   module: {
-    loaders,
+    rules: loaders,
   },
   devServer: {
-    contentBase: './public_out',
-    // do not print bundle build stats
-    noInfo: true,
-    // enable HMR
+    static: {
+      directory: path.join(__dirname, 'public_out'),
+    },
     hot: true,
-    // embed the webpack-dev-server runtime into the bundle
-    inline: true,
-    // serve index.html in place of 404 responses to allow HTML5 history
     historyApiFallback: true,
     port: PORT,
     host: HOST,
-    proxy: {
-      '/rest': `http://localhost:${mainPort}`
-    }
+    proxy: [
+      {
+        context: ['/rest'],
+        target: `http://localhost:${mainPort}`
+      }
+    ]
   },
   plugins: [
-    new webpack.NoEmitOnErrorsPlugin(),
     new webpack.HotModuleReplacementPlugin(),
-    new DashboardPlugin(),
     new HtmlWebpackPlugin({
       template: './public/template.html',
       title: 'Nucleus',
     }),
     new FaviconsWebpackPlugin({
       logo: path.resolve(__dirname, 'public/favicon.png'),
-      background: '#0F4AA3'
+      mode: 'light',
     }),
   ],
 };

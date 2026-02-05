@@ -1,4 +1,4 @@
-const AWS = require("aws-sdk");
+const { fromContainerMetadata } = require("@aws-sdk/credential-providers");
 
 module.exports = {
   /**
@@ -63,7 +63,7 @@ module.exports = {
     //   s3ForcePathStyle: true, // Always use path style URLs
     // },
     init: {
-      credentials: new AWS.ECSCredentials(),
+      credentials: fromContainerMetadata(),
       region: 'us-east-2',
     },
 
@@ -99,7 +99,7 @@ module.exports = {
   /**
    * See the documentation for your authentication strategy for what this array does
    */
-  adminIdentifiers: process.env.GITHUB_USERNAMES.split(',').map(Function.prototype.call, String.prototype.trim),
+  adminIdentifiers: (process.env.GITHUB_USERNAMES || '').split(',').map(Function.prototype.call, String.prototype.trim).filter(Boolean),
 
   /**
    * Session options, in development just leave this as default.

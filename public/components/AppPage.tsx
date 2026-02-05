@@ -218,7 +218,7 @@ autoUpdater.setFeedURL({
 });`}
               </Highlight>
             </div>
-            <h5>Publisher Usage (Electron Forge >= 6)</h5>
+            <h5>Publisher Usage (Electron Forge {'>='} 6)</h5>
             <div className={styles.codeCard}>
               <Highlight className="javascript">
 {`const forgeConfig = {
