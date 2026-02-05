@@ -6,7 +6,7 @@ import {
   ListObjectsCommand,
   DeleteObjectsCommand,
 } from '@aws-sdk/client-s3';
-import { fromInstanceMetadata } from '@aws-sdk/credential-providers';
+
 import debug from 'debug';
 
 import { CloudFrontBatchInvalidator } from './CloudFrontBatchInvalidator';
@@ -33,14 +33,12 @@ export default class S3Store implements IFileStore {
       if (this.s3Config.init.s3ForcePathStyle) {
         options.forcePathStyle = this.s3Config.init.s3ForcePathStyle;
       }
-    }
-
-    // Use EC2 metadata credentials in non-test environments
-    if (process.env.NODE_ENV !== 'test') {
-      options.credentials = fromInstanceMetadata({
-        timeout: 5000,
-        maxRetries: 10,
-      });
+      if (this.s3Config.init.credentials) {
+        options.credentials = this.s3Config.init.credentials;
+      }
+      if (this.s3Config.init.region) {
+        options.region = this.s3Config.init.region;
+      }
     }
 
     this.s3Client = new S3Client(options);

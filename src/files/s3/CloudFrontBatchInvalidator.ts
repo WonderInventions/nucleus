@@ -83,8 +83,16 @@ export class CloudFrontBatchInvalidator {
 
   private getCloudFront(): CloudFrontClient {
     const options: ConstructorParameters<typeof CloudFrontClient>[0] = {};
-    if (config.s3.init && config.s3.init.endpoint) {
-      options.endpoint = config.s3.init.endpoint;
+    if (config.s3.init) {
+      if (config.s3.init.endpoint) {
+        options.endpoint = config.s3.init.endpoint;
+      }
+      if (config.s3.init.credentials) {
+        options.credentials = config.s3.init.credentials;
+      }
+      if (config.s3.init.region) {
+        options.region = config.s3.init.region;
+      }
     }
     return new CloudFrontClient(options);
   }

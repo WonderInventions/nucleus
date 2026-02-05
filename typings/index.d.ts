@@ -7,6 +7,8 @@ interface S3Options {
   init?: {
     endpoint?: string;
     s3ForcePathStyle?: boolean;
+    credentials?: import('@aws-sdk/types').AwsCredentialIdentity | import('@aws-sdk/types').AwsCredentialIdentityProvider;
+    region?: string;
   }
 
   bucketName: string;
