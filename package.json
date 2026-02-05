@@ -67,7 +67,6 @@
     "@atlaskit/icon": "^6.6.0",
     "@atlaskit/modal-dialog": "^2.6.0",
     "@atlaskit/multi-select": "^7.1.3",
-    "@atlaskit/navigation": "^13.0.2",
     "@atlaskit/spinner": "^2.2.3",
     "@atlaskit/tabs": "^4.0.0",
     "@atlaskit/tooltip": "^6.2.0",

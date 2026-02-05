@@ -15,7 +15,7 @@ delete config.devServer;
 config.plugins = config.plugins.filter(p => !(p instanceof webpack.HotModuleReplacementPlugin));
 
 // Remove source mapping
-config.devtool = false;
+config.devtool = 'source-map';
 
 // Set mode
 config.mode = 'production';
