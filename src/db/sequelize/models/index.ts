@@ -207,6 +207,7 @@ export default async function () {
     logging: false,
     define: {
       freezeTableName: true,
+      timestamps: false,
     },
   });
 
