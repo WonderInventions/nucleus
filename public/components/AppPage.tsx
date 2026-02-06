@@ -13,8 +13,6 @@ import ChannelVersionList from './ChannelVersionList';
 import HelpHeader from './HelpHeader';
 import Highlight from './Highlight';
 import PageLoader from './PageLoader';
-import WebHookManagement from './WebHookManagement';
-
 import { fetchApps, setApps } from '../actions/apps';
 
 import styles from './AppPage.scss';
@@ -401,12 +399,6 @@ sudo apt-get install <package-name>`}
                   isDisabled={this.state.teamUpdating || this.props.hasPendingMigration}
                 />
               </div>
-              <WebHookManagement
-                app={app}
-                apps={this.props.apps}
-                setApps={this.props.setApps}
-                hasPendingMigration={this.props.hasPendingMigration}
-              />
             </div>
             : (
               <div className={styles.notFound}>
