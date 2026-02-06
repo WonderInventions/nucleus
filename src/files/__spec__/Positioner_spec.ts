@@ -1,4 +1,5 @@
-import { expect } from 'chai';
+import { describe, it, before, after, beforeEach, afterEach } from 'node:test';
+import * as assert from 'node:assert/strict';
 import { stub, SinonStub } from 'sinon';
 
 import Positioner from '../Positioner';
@@ -114,7 +115,7 @@ describe('Positioner', () => {
       },
       fileData: Buffer.from(''),
     });
-    expect(fakeStore.putFile.callCount).to.equal(0);
+    assert.strictEqual(fakeStore.putFile.callCount, 0);
   });
 
   it('should not position unknown platfroms', async () => {
@@ -131,7 +132,7 @@ describe('Positioner', () => {
       },
       fileData: Buffer.from(''),
     });
-    expect(fakeStore.putFile.callCount).to.equal(0);
+    assert.strictEqual(fakeStore.putFile.callCount, 0);
   });
 
   describe('positioning OS files', () => {
@@ -160,7 +161,7 @@ describe('Positioner', () => {
       describe('for already uploaded releases -- potentiallyUpdateLatestInstallers', () => {
         it('should do nothing if the rollout is not 100%', async () => {
           await positioner.potentiallyUpdateLatestInstallers(lock, fakeApp, Object.assign({}, fakeChannel, { versions: [{ rollout: 50 } as any] }));
-          expect(fakeStore.putFile.callCount).to.equal(0);
+          assert.strictEqual(fakeStore.putFile.callCount, 0);
         });
 
         it('should copy all installers to the latest spot when rollout=100 and latest', async () => {
@@ -190,16 +191,17 @@ describe('Positioner', () => {
               } as any],
             }),
           );
-          expect(
+          assert.strictEqual(
             fakeStore.getFile.getCalls().filter(call => !call.args[0].endsWith('.lock')).length,
-          ).to.equal(4);
-          expect(fakeStore.putFile.callCount).to.equal(4);
-          expect(fakeStore.putFile.getCall(0).args[0]).to.equal('fake_slug/fake_channel_id/latest/win32/x64/Fake Slug.exe');
-          expect(fakeStore.putFile.getCall(1).args[0]).to.equal('fake_slug/fake_channel_id/latest/win32/x64/Fake Slug.exe.ref');
-          expect(fakeStore.putFile.getCall(1).args[1].toString()).to.equal('0.0.2');
-          expect(fakeStore.putFile.getCall(2).args[0]).to.equal('fake_slug/fake_channel_id/latest/darwin/x64/Fake Slug.dmg');
-          expect(fakeStore.putFile.getCall(3).args[0]).to.equal('fake_slug/fake_channel_id/latest/darwin/x64/Fake Slug.dmg.ref');
-          expect(fakeStore.putFile.getCall(3).args[1].toString()).to.equal('0.0.2');
+            4,
+          );
+          assert.strictEqual(fakeStore.putFile.callCount, 4);
+          assert.strictEqual(fakeStore.putFile.getCall(0).args[0], 'fake_slug/fake_channel_id/latest/win32/x64/Fake Slug.exe');
+          assert.strictEqual(fakeStore.putFile.getCall(1).args[0], 'fake_slug/fake_channel_id/latest/win32/x64/Fake Slug.exe.ref');
+          assert.strictEqual(fakeStore.putFile.getCall(1).args[1].toString(), '0.0.2');
+          assert.strictEqual(fakeStore.putFile.getCall(2).args[0], 'fake_slug/fake_channel_id/latest/darwin/x64/Fake Slug.dmg');
+          assert.strictEqual(fakeStore.putFile.getCall(3).args[0], 'fake_slug/fake_channel_id/latest/darwin/x64/Fake Slug.dmg.ref');
+          assert.strictEqual(fakeStore.putFile.getCall(3).args[1].toString(), '0.0.2');
         });
       });
 
@@ -221,7 +223,7 @@ describe('Positioner', () => {
           },
           fileData: Buffer.from(''),
         });
-        expect(fakeStore.putFile.callCount).to.equal(0);
+        assert.strictEqual(fakeStore.putFile.callCount, 0);
       });
 
       it('should not upload the "Latest" file for any installer type release if it is dead', async () => {
@@ -239,7 +241,7 @@ describe('Positioner', () => {
           },
           fileData: Buffer.from(''),
         });
-        expect(fakeStore.putFile.callCount).to.equal(0);
+        assert.strictEqual(fakeStore.putFile.callCount, 0);
       });
 
       it('should not upload the "Latest" file for any installer type release if it is not at 100% rollout', async () => {
@@ -257,7 +259,7 @@ describe('Positioner', () => {
           },
           fileData: Buffer.from(''),
         });
-        expect(fakeStore.putFile.callCount).to.equal(0);
+        assert.strictEqual(fakeStore.putFile.callCount, 0);
       });
     });
 
@@ -276,7 +278,7 @@ describe('Positioner', () => {
           },
           fileData: Buffer.from(''),
         });
-        expect(fakeStore.putFile.callCount).to.equal(0);
+        assert.strictEqual(fakeStore.putFile.callCount, 0);
       });
 
       it('should position exe files in arch bucket', async () => {
@@ -294,11 +296,12 @@ describe('Positioner', () => {
           },
           fileData: fakeBuffer,
         });
-        expect(fakeStore.putFile.callCount).to.equal(1);
-        expect(fakeStore.putFile.firstCall.args[0]).to.equal(
+        assert.strictEqual(fakeStore.putFile.callCount, 1);
+        assert.strictEqual(
+          fakeStore.putFile.firstCall.args[0],
           'fake_slug/fake_channel_id/win32/ia32/thing.exe',
         );
-        expect(fakeStore.putFile.firstCall.args[1]).to.equal(fakeBuffer);
+        assert.strictEqual(fakeStore.putFile.firstCall.args[1], fakeBuffer);
       });
 
       it('should position different arches in separate key paths', async () => {
@@ -317,10 +320,11 @@ describe('Positioner', () => {
           },
           fileData: firstBuffer,
         });
-        expect(fakeStore.putFile.firstCall.args[0]).to.equal(
+        assert.strictEqual(
+          fakeStore.putFile.firstCall.args[0],
           'fake_slug/fake_channel_id/win32/ia32/thing.exe',
         );
-        expect(fakeStore.putFile.firstCall.args[1]).to.equal(firstBuffer);
+        assert.strictEqual(fakeStore.putFile.firstCall.args[1], firstBuffer);
         fakeStore.getFile.onCall(2).returns(Buffer.from(lock));
         await positioner.handleUpload(lock, {
           app: fakeApp,
@@ -335,10 +339,11 @@ describe('Positioner', () => {
           },
           fileData: secondBuffer,
         });
-        expect(fakeStore.putFile.secondCall.args[0]).to.equal(
+        assert.strictEqual(
+          fakeStore.putFile.secondCall.args[0],
           'fake_slug/fake_channel_id/win32/x64/thing.exe',
         );
-        expect(fakeStore.putFile.secondCall.args[1]).to.equal(secondBuffer);
+        assert.strictEqual(fakeStore.putFile.secondCall.args[1], secondBuffer);
       });
 
       it('should position nupkg files in arch bucket', async () => {
@@ -358,12 +363,13 @@ describe('Positioner', () => {
           fileData: fakeBuffer,
         });
         // NUPKG + REF + 101*RELEASES
-        expect(fakeStore.putFile.callCount).to.equal(2 + 101);
-        expect(fakeStore.putFile.firstCall.args[0]).to.equal(
+        assert.strictEqual(fakeStore.putFile.callCount, 2 + 101);
+        assert.strictEqual(
+          fakeStore.putFile.firstCall.args[0],
           'fake_slug/fake_channel_id/win32/ia32/thing-full.nupkg',
         );
-        expect(fakeStore.putFile.firstCall.args[1]).to.equal(fakeBuffer);
-        expect(fakeStore.putFile.firstCall.args[2]).to.equal(undefined, 'should not override existing release');
+        assert.strictEqual(fakeStore.putFile.firstCall.args[1], fakeBuffer);
+        assert.strictEqual(fakeStore.putFile.firstCall.args[2], undefined, 'should not override existing release');
       });
 
       it('should update the RELEASES file with correct hash and filename for all nupkg uploads', async () => {
@@ -387,14 +393,16 @@ describe('Positioner', () => {
           fileData: fakeBuffer,
         });
         // NUPKG + REF + 101*RELEASES
-        expect(fakeStore.putFile.callCount).to.equal(2 + 101);
-        expect(fakeStore.putFile.secondCall.args[0]).to.equal(
+        assert.strictEqual(fakeStore.putFile.callCount, 2 + 101);
+        assert.strictEqual(
+          fakeStore.putFile.secondCall.args[0],
           'fake_slug/fake_channel_id/win32/ia32/RELEASES',
         );
-        expect(fakeStore.putFile.secondCall.args[1].toString()).to.equal(
+        assert.strictEqual(
+          fakeStore.putFile.secondCall.args[1].toString(),
           '0F2320FC3B29E1CD9F989DBF547BCD4D21D3BD12 https://foo.bar/fake_slug/fake_channel_id/win32/ia32/thing-full.nupkg 8',
         );
-        expect(fakeStore.putFile.secondCall.args[2]).to.equal(true, 'should override existing RELEASES');
+        assert.strictEqual(fakeStore.putFile.secondCall.args[2], true, 'should override existing RELEASES');
       });
 
       it('should append to the existing RELEASES file if available', async () => {
@@ -431,11 +439,13 @@ describe('Positioner', () => {
           fileData: fakeDeltaBuffer,
         });
         // NUPKG + REF + 101*RELEASES
-        expect(fakeStore.putFile.callCount).to.equal(2 + 101);
-        expect(fakeStore.putFile.secondCall.args[0]).to.equal(
+        assert.strictEqual(fakeStore.putFile.callCount, 2 + 101);
+        assert.strictEqual(
+          fakeStore.putFile.secondCall.args[0],
           'fake_slug/fake_channel_id/win32/ia32/RELEASES',
         );
-        expect(fakeStore.putFile.secondCall.args[1].toString()).to.equal(
+        assert.strictEqual(
+          fakeStore.putFile.secondCall.args[1].toString(),
           '0F2320FC3B29E1CD9F989DBF547BCD4D21D3BD12 https://foo.bar/fake_slug/fake_channel_id/win32/ia32/thing-full.nupkg 8\n' +
           'EF5518DDAF73D40E2A7A31C627702CFFBF59862D https://foo.bar/fake_slug/fake_channel_id/win32/ia32/thing-delta.nupkg 14',
         );
@@ -457,7 +467,7 @@ describe('Positioner', () => {
           },
           fileData: fakeBuffer,
         });
-        expect(fakeStore.putFile.callCount).to.equal(1);
+        assert.strictEqual(fakeStore.putFile.callCount, 1);
       });
     });
 
@@ -489,7 +499,7 @@ describe('Positioner', () => {
           },
           fileData: Buffer.from(''),
         });
-        expect(fakeStore.putFile.callCount).to.equal(0);
+        assert.strictEqual(fakeStore.putFile.callCount, 0);
       });
 
       it('should position dmg files in arch bucket', async () => {
@@ -507,11 +517,12 @@ describe('Positioner', () => {
           },
           fileData: fakeBuffer,
         });
-        expect(fakeStore.putFile.callCount).to.equal(1);
-        expect(fakeStore.putFile.firstCall.args[0]).to.equal(
+        assert.strictEqual(fakeStore.putFile.callCount, 1);
+        assert.strictEqual(
+          fakeStore.putFile.firstCall.args[0],
           'fake_slug/fake_channel_id/darwin/x64/thing.dmg',
         );
-        expect(fakeStore.putFile.firstCall.args[1]).to.equal(fakeBuffer);
+        assert.strictEqual(fakeStore.putFile.firstCall.args[1], fakeBuffer);
       });
 
       it('should position zip files in arch bucket', async () => {
@@ -530,11 +541,12 @@ describe('Positioner', () => {
           fileData: fakeBuffer,
         });
         // ZIP + REF + 101*RELEASES
-        expect(fakeStore.putFile.callCount).to.equal(2 + 101);
-        expect(fakeStore.putFile.firstCall.args[0]).to.equal(
+        assert.strictEqual(fakeStore.putFile.callCount, 2 + 101);
+        assert.strictEqual(
+          fakeStore.putFile.firstCall.args[0],
           'fake_slug/fake_channel_id/darwin/x64/thing.zip',
         );
-        expect(fakeStore.putFile.firstCall.args[1]).to.equal(fakeBuffer);
+        assert.strictEqual(fakeStore.putFile.firstCall.args[1], fakeBuffer);
       });
 
       it('should create a RELEASES.json file if it doesn\'t exist when uploading zips', async () => {
@@ -559,11 +571,12 @@ describe('Positioner', () => {
           fileData: fakeBuffer,
         });
         // ZIP + REF + 101*RELEASES
-        expect(fakeStore.putFile.callCount).to.equal(2 + 101);
-        expect(fakeStore.putFile.secondCall.args[0]).to.equal(
+        assert.strictEqual(fakeStore.putFile.callCount, 2 + 101);
+        assert.strictEqual(
+          fakeStore.putFile.secondCall.args[0],
           'fake_slug/fake_channel_id/darwin/x64/RELEASES.json',
         );
-        expect(JSON.parse(fakeStore.putFile.secondCall.args[1].toString())).to.deep.equal(v1);
+        assert.deepStrictEqual(JSON.parse(fakeStore.putFile.secondCall.args[1].toString()), v1);
       });
 
       it('should update the RELEASES.json file if it already exits when uploading zips', async () => {
@@ -588,11 +601,12 @@ describe('Positioner', () => {
           fileData: fakeBuffer,
         });
         // ZIP + REF + 101*RELEASES
-        expect(fakeStore.putFile.callCount).to.equal(2 + 101);
-        expect(fakeStore.putFile.secondCall.args[0]).to.equal(
+        assert.strictEqual(fakeStore.putFile.callCount, 2 + 101);
+        assert.strictEqual(
+          fakeStore.putFile.secondCall.args[0],
           'fake_slug/fake_channel_id/darwin/x64/RELEASES.json',
         );
-        expect(JSON.parse(fakeStore.putFile.secondCall.args[1].toString())).to.deep.equal(v2);
+        assert.deepStrictEqual(JSON.parse(fakeStore.putFile.secondCall.args[1].toString()), v2);
       });
 
       it('should update the RELEASES.json file even if the version is already in the releases array but not use the new file', async () => {
@@ -613,8 +627,8 @@ describe('Positioner', () => {
           fileData: fakeBuffer,
         });
         // ZIP + REF + 101*RELEASES
-        expect(fakeStore.putFile.callCount).to.equal(2 + 101);
-        expect(JSON.parse(fakeStore.putFile.secondCall.args[1].toString())).to.deep.equal(v2);
+        assert.strictEqual(fakeStore.putFile.callCount, 2 + 101);
+        assert.deepStrictEqual(JSON.parse(fakeStore.putFile.secondCall.args[1].toString()), v2);
       });
 
       it('should not update the "currentRelease" property in the RELEASES.json file if it is higher than the new release', async () => {
@@ -640,8 +654,9 @@ describe('Positioner', () => {
           fileData: fakeBuffer,
         });
         // ZIP + REF + 101*RELEASES
-        expect(fakeStore.putFile.callCount).to.equal(2 + 101);
-        expect(fakeStore.putFile.secondCall.args[0]).to.equal(
+        assert.strictEqual(fakeStore.putFile.callCount, 2 + 101);
+        assert.strictEqual(
+          fakeStore.putFile.secondCall.args[0],
           'fake_slug/fake_channel_id/darwin/x64/RELEASES.json',
         );
         const expected = Object.assign({}, v1);
@@ -656,7 +671,7 @@ describe('Positioner', () => {
           },
           version: '0.0.1',
         });
-        expect(JSON.parse(fakeStore.putFile.secondCall.args[1].toString())).to.deep.equal(expected);
+        assert.deepStrictEqual(JSON.parse(fakeStore.putFile.secondCall.args[1].toString()), expected);
       });
 
       it('should not update the RELEASES.json file if the zip already existed on the bucket', async () => {
@@ -675,7 +690,7 @@ describe('Positioner', () => {
           },
           fileData: fakeBuffer,
         });
-        expect(fakeStore.putFile.callCount).to.equal(1);
+        assert.strictEqual(fakeStore.putFile.callCount, 1);
       });
     });
 
@@ -695,7 +710,7 @@ describe('Positioner', () => {
           },
           fileData: Buffer.from(''),
         });
-        expect(fakeStore.putFile.callCount).to.equal(0);
+        assert.strictEqual(fakeStore.putFile.callCount, 0);
       });
     });
   });
@@ -721,34 +736,34 @@ describe('Positioner', () => {
     });
 
     it('should obtain the lock when nothing has claimed it', async () => {
-      expect(await positioner.requestLock(fakeApp)).to.not.equal(null);
+      assert.notStrictEqual(await positioner.requestLock(fakeApp), null);
     });
 
     it('should obtain two locks for different apps simultaneously', async () => {
-      expect(await positioner.requestLock(fakeApp)).to.not.equal(null);
-      expect(await positioner.requestLock(fakeApp2)).to.not.equal(null);
+      assert.notStrictEqual(await positioner.requestLock(fakeApp), null);
+      assert.notStrictEqual(await positioner.requestLock(fakeApp2), null);
     });
 
     it('should not issue two locks for the same app simultaneously', async () => {
-      expect(await positioner.requestLock(fakeApp)).to.not.equal(null);
-      expect(await positioner.requestLock(fakeApp)).to.equal(null);
+      assert.notStrictEqual(await positioner.requestLock(fakeApp), null);
+      assert.strictEqual(await positioner.requestLock(fakeApp), null);
     });
 
     it('should issue two locks for the same app sequentially', async () => {
       const lock = (await positioner.requestLock(fakeApp))!;
-      expect(lock).to.not.equal(null);
+      assert.notStrictEqual(lock, null);
       await positioner.releaseLock(fakeApp, lock);
       const secondLock = await positioner.requestLock(fakeApp);
-      expect(secondLock).to.not.equal(null);
-      expect(lock).to.not.equal(secondLock, 'locks should be unique');
+      assert.notStrictEqual(secondLock, null);
+      assert.notStrictEqual(lock, secondLock, 'locks should be unique');
     });
 
     it('should not release a lock if the existing lock is not provided', async () => {
       const lock = (await positioner.requestLock(fakeApp))!;
       await positioner.releaseLock(fakeApp, 'this-is-not-the-lock');
-      expect(await positioner.requestLock(fakeApp)).to.equal(null);
+      assert.strictEqual(await positioner.requestLock(fakeApp), null);
       await positioner.releaseLock(fakeApp, lock);
-      expect(await positioner.requestLock(fakeApp)).to.not.equal(null);
+      assert.notStrictEqual(await positioner.requestLock(fakeApp), null);
     });
   });
 });

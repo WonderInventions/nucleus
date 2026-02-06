@@ -1,12 +1,17 @@
 import * as React from 'react';
-import * as ReactDOM from 'react-dom';
-import * as hljs from 'highlight.js/lib/highlight';
-import * as bashLanguage from 'highlight.js/lib/languages/bash';
-import * as javascriptLanguage from 'highlight.js/lib/languages/javascript';
+import hljs from 'highlight.js/lib/core';
+import bash from 'highlight.js/lib/languages/bash';
+import javascript from 'highlight.js/lib/languages/javascript';
+
+hljs.registerLanguage('bash', bash);
+hljs.registerLanguage('javascript', javascript);
 
 export default class Highlight extends React.PureComponent<{
   className: string;
-}, null> {
+  children?: React.ReactNode;
+}, {}> {
+  private codeRef = React.createRef<HTMLElement>();
+
   componentDidMount() {
     this.highlightCode();
   }
@@ -16,16 +21,8 @@ export default class Highlight extends React.PureComponent<{
   }
 
   highlightCode() {
-    const { className } = this.props;
-    const domNode = ReactDOM.findDOMNode(this);
-    const nodes = domNode.querySelectorAll('pre code');
-
-    hljs.registerLanguage('javascript', javascriptLanguage);
-    hljs.registerLanguage('bash', bashLanguage);
-
-    let i;
-    for (i = 0; i < nodes.length; i += 1) {
-      hljs.highlightBlock(nodes[i]);
+    if (this.codeRef.current) {
+      hljs.highlightElement(this.codeRef.current);
     }
   }
 
@@ -33,7 +30,7 @@ export default class Highlight extends React.PureComponent<{
     const { children, className } = this.props;
     return (
       <pre>
-        <code className={className}>
+        <code ref={this.codeRef} className={className}>
           {children}
         </code>
       </pre>

@@ -1,7 +1,7 @@
-import * as express from 'express';
-import * as debug from 'debug';
+import { RequestHandler } from 'express';
+import debug from 'debug';
 
-export const createA = (d: debug.IDebugger) => (handler: express.RequestHandler): express.RequestHandler => async (req, res, next) => {
+export const createA = (d: debug.IDebugger) => (handler: RequestHandler): RequestHandler => async (req, res, next) => {
   try {
     await handler(req, res, next);
   } catch (err) {

@@ -1,9 +1,9 @@
 import * as React from 'react';
 import { connect } from 'react-redux';
-import { Link } from 'react-router';
+import { Link } from 'react-router-dom';
 
-import * as styles from './AppCard.scss';
-import * as favicon from '../favicon.png';
+import styles from './AppCard.scss';
+import favicon from '../favicon.png';
 
 export interface AppCardReduxProps {
   baseUpdateUrl: string;
@@ -17,7 +17,9 @@ export interface AppCardComponentProps {
 
 class AppCard extends React.PureComponent<AppCardReduxProps & AppCardComponentProps, null> {
   private badImage = (e) => {
-    e.currentTarget.src = favicon;
+    if (e.currentTarget.src !== favicon) {
+      e.currentTarget.src = favicon;
+    }
   }
 
   render() {

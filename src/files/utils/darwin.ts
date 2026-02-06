@@ -30,7 +30,7 @@ export const generateDarwinReleasesStructure = async ({
   arch,
   store,
 }: DarwinHelperOpts, rollout = 100) => {
-  const root = path.posix.join(app.slug, channel.id, 'darwin', arch);
+  const root = path.posix.join(app.slug, channel.id!, 'darwin', arch);
   const versions: NucleusVersion[] = channel.versions
     .filter(v => !v.dead && v.rollout >= rollout)
     .filter((version) => {
@@ -82,7 +82,7 @@ export const updateDarwinReleasesFiles = async ({
   arch,
   store,
 }: DarwinHelperOpts) => {
-  const root = path.posix.join(app.slug, channel.id, 'darwin', arch);
+  const root = path.posix.join(app.slug, channel.id!, 'darwin', arch);
   const releasesKey = path.posix.join(root, 'RELEASES.json');
   const releasesJson = await generateDarwinReleasesStructure(
     {
@@ -95,7 +95,7 @@ export const updateDarwinReleasesFiles = async ({
   );
   await store.putFile(releasesKey, Buffer.from(JSON.stringify(releasesJson, null, 2), 'utf8'), true);
 
-  let uploads = [];
+  const uploads: Promise<boolean>[] = [];
   for (let rollout = 0; rollout <= 100; rollout += 1) {
     const rolloutKey = path.posix.join(root, `${rollout}`, 'RELEASES.json');
     const json = await generateDarwinReleasesStructure(

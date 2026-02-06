@@ -1,6 +1,5 @@
 import * as React from 'react';
-import { render } from 'react-dom';
-import { AppContainer } from 'react-hot-loader';
+import { createRoot } from 'react-dom/client';
 import { Provider } from 'react-redux';
 import { createStore } from 'redux';
 
@@ -11,27 +10,11 @@ import '@atlaskit/css-reset/dist/bundle.css';
 
 const store = createStore(reducers);
 
-render(
-  <AppContainer>
-    <Provider store={store}>
-      <App />
-    </Provider>
-  </AppContainer>,
-  document.querySelector('#app'),
-);
+const container = document.querySelector('#app');
+const root = createRoot(container!);
 
-if (module && module.hot) {
-  module.hot.accept('./App.tsx', () => {
-    /* tslint:disable */
-    const NewApp = require('./App').default;
-  /* tslint:enable */
-    render(
-      <AppContainer>
-        <Provider store={store}>
-          <NewApp />
-        </Provider>
-      </AppContainer>,
-      document.querySelector('#app'),
-    );
-  });
-}
+root.render(
+  <Provider store={store}>
+    <App />
+  </Provider>,
+);

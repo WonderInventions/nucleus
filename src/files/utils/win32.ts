@@ -19,7 +19,7 @@ export const generateWin32ReleasesStructure = async ({
   positioner,
   cachedFileSizes,
 }: Win32HelperOpts, rollout = 100) => {
-  const root = path.posix.join(app.slug, channel.id, 'win32', arch);
+  const root = path.posix.join(app.slug, channel.id!, 'win32', arch);
 
   const versions: NucleusVersion[] = channel.versions
     .filter(v => !v.dead && v.rollout >= rollout);
@@ -57,7 +57,7 @@ export const updateWin32ReleasesFiles = async ({
   positioner,
   cachedFileSizes,
 }: Win32HelperOpts) => {
-  const root = path.posix.join(app.slug, channel.id, 'win32', arch);
+  const root = path.posix.join(app.slug, channel.id!, 'win32', arch);
   const releasesKey = path.posix.join(root, 'RELEASES');
   const releases = await generateWin32ReleasesStructure(
     {
@@ -72,7 +72,7 @@ export const updateWin32ReleasesFiles = async ({
   );
   await store.putFile(releasesKey, Buffer.from(releases, 'utf8'), true);
 
-  let uploads = [];
+  const uploads: Promise<boolean>[] = [];
   for (let rollout = 0; rollout <= 100; rollout += 1) {
     const rolloutKey = path.posix.join(root, `${rollout}`, 'RELEASES');
     const rolloutReleases = await generateWin32ReleasesStructure(

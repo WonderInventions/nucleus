@@ -1,4 +1,4 @@
-import * as debug from 'debug';
+import debug from 'debug';
 
 import driver from '../db/driver';
 
@@ -45,7 +45,7 @@ export default abstract class BaseMigration<T> {
     return this.dMem;
   }
 
-  abstract async getItems(): Promise<MigrationItem<T>[]>;
+  abstract getItems(): Promise<MigrationItem<T>[]>;
 
-  abstract async runOnItem(item: MigrationItem<T>): Promise<void>;
+  abstract runOnItem(item: MigrationItem<T>): Promise<void>;
 }

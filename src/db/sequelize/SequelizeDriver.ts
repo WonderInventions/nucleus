@@ -1,18 +1,13 @@
 import { Sequelize } from 'sequelize-typescript';
 
 import BaseDriver from '../BaseDriver';
-import getSequelize, { App, TeamMember, Channel, Version, File, TemporarySave, TemporarySaveFile, WebHook, WebHookError, Migration } from './models';
+import getSequelize, { App, TeamMember, Channel, Version, File, TemporarySave, TemporarySaveFile, Migration } from './models';
+import { randomUUID } from 'crypto';
 import BaseMigration from '../../migrations/BaseMigration';
 import * as config from '../../config';
 
-const hat = require('hat');
-
 const includeSettings = {
   include: [
-    {
-      model: WebHook,
-      include: [WebHookError],
-    },
     TeamMember,
     {
       model: Channel,
@@ -47,7 +42,7 @@ export default class SequelizeDriver extends BaseDriver {
     const app = new App({
       name,
       slug: proposedSlug,
-      token: hat(),
+      token: randomUUID(),
     });
     await app.save();
     const teamMember = new TeamMember({
@@ -86,8 +81,8 @@ export default class SequelizeDriver extends BaseDriver {
 
   public async resetAppToken(app: NucleusApp) {
     await this.ensureConnected();
-    const rawApp = (await App.findById<App>(app.id))!;
-    rawApp.set('token', hat());
+    const rawApp = (await App.findByPk<App>(app.id))!;
+    rawApp.set('token', randomUUID());
     await rawApp.save();
     return (await this.getApp(rawApp.id))!;
   }
@@ -100,18 +95,7 @@ export default class SequelizeDriver extends BaseDriver {
     newApp.token = app.token;
     newApp.team = (app.team || []).map(teamMember => teamMember.userId);
     newApp.channels = (app.channels || []).map(channel => this.fixChannelStruct(channel));
-    newApp.webHooks = (app.webHooks || []).map(webHook => this.fixWebHookStruct(webHook));
     return newApp;
-  }
-
-  private fixWebHookStruct(webHook: WebHook): NucleusWebHook {
-    return {
-      id: webHook.id,
-      url: webHook.url, 
-      secret: webHook.secret,
-      registered: webHook.registered,
-      errors: (webHook.errors || []).map(error => error.get()),
-    };
   }
 
   private fixChannelStruct(channel: Channel): NucleusChannel {
@@ -147,7 +131,7 @@ export default class SequelizeDriver extends BaseDriver {
 
   public async getApp(id: AppID) {
     await this.ensureConnected();
-    const app = await App.findById<App>(parseInt(id, 10), includeSettings);
+    const app = await App.findByPk<App>(parseInt(id, 10), includeSettings);
     if (app) return this.fixAppStruct(app.get());
     return null;
   }
@@ -155,7 +139,7 @@ export default class SequelizeDriver extends BaseDriver {
   public async createChannel(app: NucleusApp, channelName: string) {
     await this.ensureConnected();
     const channel = new Channel({
-      stringId: hat(),
+      stringId: randomUUID(),
       name: channelName,
       appId: app.id,
     });
@@ -219,10 +203,10 @@ export default class SequelizeDriver extends BaseDriver {
     };
   }
 
-  public async getTemporarySave(temporaryId: number) {
+  public async getTemporarySave(temporaryId: string | number) {
     const save = await TemporarySave.findOne<TemporarySave>({
       where: {
-        id: temporaryId,
+        id: typeof temporaryId === 'string' ? parseInt(temporaryId, 10) : temporaryId,
       },
       include: [TemporarySaveFile],
     });
@@ -260,8 +244,8 @@ export default class SequelizeDriver extends BaseDriver {
       arch,
       version,
       date: new Date(),
-      saveString: hat(),
-      cipherPassword: hat(),
+      saveString: randomUUID(),
+      cipherPassword: randomUUID(),
       channelId: rawChannel.id,
     });
     await save.save();
@@ -334,51 +318,6 @@ export default class SequelizeDriver extends BaseDriver {
     await rawSave.destroy();
   }
 
-  public async createWebHook(app: NucleusApp, url: string, secret: string) {
-    const webHook = new WebHook({
-      url,
-      secret,
-      registered: false,
-      appId: app.id,
-    });
-    await webHook.save();
-    return this.fixWebHookStruct(webHook);
-  }
-
-  public async getWebHook(app: NucleusApp, webHookId: number) {
-    const webHook = await WebHook.findById<WebHook>(webHookId, {
-      include: [WebHookError],
-    });
-    if (!webHook) return null;
-    return this.fixWebHookStruct(webHook);
-  }
-
-  public async deleteWebHook(app: NucleusApp, webHookId: number) {
-    const webHook = await WebHook.findById<WebHook>(webHookId);
-    if (!webHook) return;
-    await webHook.destroy();
-  }
-
-  public async createWebHookError(app: NucleusApp, webHookId: number, message: string, code: number, body: string) {
-    const error = new WebHookError({
-      webHookId,
-      message: message.substr(0, 1000),
-      responseCode: code,
-      responseBody: body.substr(0, 10000),
-    });
-    await error.save();
-  }
-
-  public async setWebHookRegistered(app: NucleusApp, webHookId: number, registered: boolean) {
-    const webHook = await WebHook.findById<WebHook>(webHookId, {
-      include: [WebHookError],
-    });
-    if (!webHook) return null;
-    webHook.registered = registered;
-    await webHook.save();
-    return this.fixWebHookStruct(webHook);
-  }
-
   public async setVersionDead(app: NucleusApp, channel: NucleusChannel, versionName: string, dead: boolean) {
     await this.ensureConnected();
     const rawChannel = await Channel.findOne<Channel>({
@@ -443,7 +382,7 @@ export default class SequelizeDriver extends BaseDriver {
   }
 
   public async storeSHAs(file: NucleusFile, hashes: HashSet) {
-    const rawFile = await File.findById<File>(file.id);
+    const rawFile = await File.findByPk<File>(file.id);
     if (!rawFile) return null;
 
     rawFile.sha1 = hashes.sha1;

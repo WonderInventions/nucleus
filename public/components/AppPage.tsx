@@ -1,5 +1,6 @@
 import * as React from 'react';
 import { connect, Dispatch } from 'react-redux';
+import { useParams } from 'react-router-dom';
 import { UploadField } from '@navjobs/upload';
 
 import AkButton from '@atlaskit/button';
@@ -12,11 +13,9 @@ import ChannelVersionList from './ChannelVersionList';
 import HelpHeader from './HelpHeader';
 import Highlight from './Highlight';
 import PageLoader from './PageLoader';
-import WebHookManagement from './WebHookManagement';
-
 import { fetchApps, setApps } from '../actions/apps';
 
-import * as styles from './AppPage.scss';
+import styles from './AppPage.scss';
 
 import 'highlight.js/styles/vs.css';
 
@@ -40,12 +39,11 @@ interface AppPageState {
   multiDraw: number;
 }
 
-class AppPage extends React.PureComponent<AppPageReduxProps & AppPageReduxDispatchProps & AppPageComponentProps, AppPageState> {
-  props: AppPageReduxProps & AppPageReduxDispatchProps & AppPageComponentProps & {
-    routeParams: {
-      appSlug: string;
-    },
-  };
+interface AppPageRouteProps {
+  routeParams: { appSlug: string };
+}
+
+class AppPageInner extends React.PureComponent<AppPageReduxProps & AppPageReduxDispatchProps & AppPageComponentProps & AppPageRouteProps, AppPageState> {
   state = {
     loading: false,
     resetting: false,
@@ -218,7 +216,7 @@ autoUpdater.setFeedURL({
 });`}
               </Highlight>
             </div>
-            <h5>Publisher Usage (Electron Forge >= 6)</h5>
+            <h5>Publisher Usage (Electron Forge {'>='} 6)</h5>
             <div className={styles.codeCard}>
               <Highlight className="javascript">
 {`const forgeConfig = {
@@ -401,12 +399,6 @@ sudo apt-get install <package-name>`}
                   isDisabled={this.state.teamUpdating || this.props.hasPendingMigration}
                 />
               </div>
-              <WebHookManagement
-                app={app}
-                apps={this.props.apps}
-                setApps={this.props.setApps}
-                hasPendingMigration={this.props.hasPendingMigration}
-              />
             </div>
             : (
               <div className={styles.notFound}>
@@ -433,4 +425,11 @@ const mapDispatchToProps = (dispatch: Dispatch<void>) => ({
   setApps: (apps: NucleusApp[]) => dispatch(setApps(apps)),
 });
 
-export default connect<AppPageReduxProps, AppPageReduxDispatchProps, AppPageComponentProps>(mapStateToProps, mapDispatchToProps)(AppPage);
+const ConnectedAppPage = connect<AppPageReduxProps, AppPageReduxDispatchProps, AppPageComponentProps & AppPageRouteProps>(mapStateToProps, mapDispatchToProps)(AppPageInner);
+
+function AppPage() {
+  const params = useParams();
+  return <ConnectedAppPage routeParams={{ appSlug: params.appSlug || '' }} />;
+}
+
+export default AppPage;

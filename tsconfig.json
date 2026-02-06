@@ -1,24 +1,29 @@
 {
-	"compilerOptions": {
-		"module": "commonjs",
-		"target": "es6",
-		"outDir": "lib",
-		"lib": [
-			"es6",
-			"dom",
-			"es7"
-		],
-		"sourceMap": true,
-		"rootDir": "src",
-		"jsx": "react",
-		"experimentalDecorators": true,
-		"strictNullChecks": true,
-		"noUnusedLocals": true,
-		"noImplicitThis": true,
-		"noImplicitAny": true
-	},
-	"exclude": [
-		"node_modules",
-		"public"
-	]
+  "compilerOptions": {
+    "module": "commonjs",
+    "target": "ES2022",
+    "outDir": "lib",
+    "lib": [
+      "ES2022",
+      "dom"
+    ],
+    "sourceMap": true,
+    "rootDir": "src",
+    "jsx": "react",
+    "experimentalDecorators": true,
+    "emitDecoratorMetadata": true,
+    "strictNullChecks": true,
+    "noUnusedLocals": true,
+    "noImplicitThis": true,
+    "noImplicitAny": true,
+    "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
+    "skipLibCheck": true,
+    "moduleResolution": "node"
+  },
+  "exclude": [
+    "node_modules",
+    "public",
+    "src/**/__spec__"
+  ]
 }

@@ -1,4 +1,4 @@
-FROM node:18
+FROM node:24
 
 RUN apt update && apt install createrepo-c dpkg-dev apt-utils gnupg2 gzip rpm -y && rm -rf /var/lib/apt/lists/*
 

@@ -1,5 +1,6 @@
 import * as crypto from 'crypto';
-import * as debug from 'debug';
+import { randomUUID } from 'crypto';
+import debug from 'debug';
 import * as path from 'path';
 import * as semver from 'semver';
 
@@ -7,8 +8,6 @@ import { initializeAptRepo, addFileToAptRepo } from './utils/apt';
 import { initializeYumRepo, addFileToYumRepo } from './utils/yum';
 import { updateDarwinReleasesFiles } from './utils/darwin';
 import { updateWin32ReleasesFiles } from './utils/win32';
-
-const hat = require('hat');
 
 const VALID_WINDOWS_SUFFIX = ['-full.nupkg', '-delta.nupkg', '.exe', '.msi'];
 const VALID_DARWIN_SUFFIX = ['.dmg', '.zip', '.pkg'];
@@ -102,12 +101,12 @@ export default class Positioner {
   }
 
   public getIndexKey(app: NucleusApp, channel: NucleusChannel, version: NucleusVersion, file: NucleusFile) {
-    return path.posix.join(app.slug, channel.id, '_index', version.name, file.platform, file.arch, file.fileName);
+    return path.posix.join(app.slug, channel.id!, '_index', version.name, file.platform, file.arch, file.fileName);
   }
 
   public getLatestKey(app: NucleusApp, channel: NucleusChannel, version: NucleusVersion, file: NucleusFile) {
     const ext = path.extname(file.fileName);
-    return path.posix.join(app.slug, channel.id, 'latest', file.platform, file.arch, `${app.name}${ext}`);
+    return path.posix.join(app.slug, channel.id!, 'latest', file.platform, file.arch, `${app.name}${ext}`);
   }
 
   /**
@@ -184,7 +183,7 @@ export default class Positioner {
     file,
     fileData,
   }: HandlePlatformUploadOpts) {
-    const root = path.posix.join(app.slug, channel.id, 'win32', file.arch);
+    const root = path.posix.join(app.slug, channel.id!, 'win32', file.arch);
     const key = path.posix.join(root, file.fileName);
     if (!VALID_WINDOWS_SUFFIX.some(suffix => file.fileName.endsWith(suffix))) {
       d(`Attempted to upload a file for win32 but it had an invalid suffix: ${file.fileName}`);
@@ -215,7 +214,7 @@ export default class Positioner {
     file,
     fileData,
   }: HandlePlatformUploadOpts) {
-    const root = path.posix.join(app.slug, channel.id, 'darwin', file.arch);
+    const root = path.posix.join(app.slug, channel.id!, 'darwin', file.arch);
     const fileKey = path.posix.join(root, file.fileName);
     if (!VALID_DARWIN_SUFFIX.some(suffix => file.fileName.endsWith(suffix))) {
       d(`Attempted to upload a file for darwin but it had an invalid suffix: ${file.fileName}`);
@@ -256,7 +255,7 @@ export default class Positioner {
 
   public requestLock = async (app: NucleusApp): Promise<PositionerLock | null> => {
     const lockFile = path.posix.join(app.slug, '.lock');
-    const lock = hat();
+    const lock = randomUUID();
     const currentLock = (await this.store.getFile(lockFile)).toString('utf8');
     if (currentLock === '') {
       await this.store.putFile(lockFile, Buffer.from(lock), true);
@@ -289,6 +288,6 @@ export default class Positioner {
   public initializeStructure = async (app: NucleusApp, channel: NucleusChannel) => {
     await initializeYumRepo(this.store, app, channel);
     await initializeAptRepo(this.store, app, channel);
-    await this.store.putFile(path.posix.join(app.slug, channel.id, 'versions.json'), Buffer.from(JSON.stringify([])));
+    await this.store.putFile(path.posix.join(app.slug, channel.id!, 'versions.json'), Buffer.from(JSON.stringify([])));
   }
 }

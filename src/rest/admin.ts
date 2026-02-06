@@ -1,5 +1,5 @@
-import * as debug from 'debug';
-import * as express from 'express';
+import debug from 'debug';
+import express from 'express';
 
 import driver from '../db/driver';
 import { createA } from '../utils/a';
@@ -15,7 +15,7 @@ adminRouter.get('/release-locks', a(async (req, res) => {
   const apps = await driver.getApps();
   const positioner = new Positioner(store);
 
-  d(`admin user ${req.user.id} is clearing all existing locks`);
+  d(`admin user ${req.user?.id} is clearing all existing locks`);
 
   for (const app of apps) {
     const lock = await positioner.currentLock(app);

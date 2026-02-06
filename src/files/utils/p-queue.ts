@@ -8,7 +8,7 @@ export const runPQ = async <T, R>(items: T[], executor: (item: T) => R, simultan
 
   let done: (err?: any) => void;
   let isDone = false;
-  const promise = new Promise((resolve, reject) => {
+  const promise = new Promise<void>((resolve, reject) => {
     done = (err?: any) => {
       isDone = true;
       if (err) return reject(err);

@@ -5,33 +5,35 @@ module.exports = {
 
   baseURL: 'http://localhost:8987',
 
-  dbStrategy: 'sequelize',
-
-  sequelize: {
-    dialect: 'sqlite',
-    storage: path.resolve(__dirname, 'test.sqlite'),
-  },
-
   fileStrategy: 'local',
 
   local: {
     root: path.resolve(__dirname, '.files'),
-    staticUrl: 'http://localhost:9999'
+    staticUrl: 'http://localhost:9999',
   },
 
-  authStrategy: 'local',
+  sequelize: {
+    dialect: 'mysql',
+    database: 'nucleus_test',
+    username: 'root',
+    password: '',
+    host: 'localhost',
+    port: 3306,
+  },
 
-  localAuth: [{
-    displayName: 'Charlie',
-    username: 'charlie',
-    password: 'charlie',
-    photo: 'https://pbs.twimg.com/profile_images/1219364727/charlie-support_400x400.png'
-  }],
+  s3: {
+    bucketName: 'test-bucket',
+    cloudfront: null,
+  },
 
-  adminIdentifiers: ['charlie'],
+  github: {
+    clientID: 'test-client-id',
+    clientSecret: 'test-client-secret',
+  },
+
+  adminIdentifiers: ['test-admin'],
 
   sessionConfig: {
-    type: null,
     secret: 'ThisIsForTesting',
   },
 
@@ -195,5 +197,7 @@ ogtdiJMv6zt/bsG7BhDAkiAdabgoqrdojEkKG++F9zcR/gqS7Kr2+mxZe50mWLB5
 MQ==
 =A1i7
 -----END PGP PRIVATE KEY BLOCK-----
-`
+`,
+
+  defaultRollout: 0,
 };

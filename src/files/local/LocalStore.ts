@@ -1,7 +1,16 @@
-import * as fs from 'fs-extra';
+import * as fs from 'fs/promises';
 import * as path from 'path';
 
 import * as config from '../../config';
+
+const pathExists = async (p: string): Promise<boolean> => {
+  try {
+    await fs.access(p);
+    return true;
+  } catch {
+    return false;
+  }
+};
 
 export default class LocalStore implements IFileStore {
   constructor(private localConfig = config.local) {}
@@ -11,8 +20,8 @@ export default class LocalStore implements IFileStore {
   }
 
   public async putFile(key: string, data: Buffer, overwrite = false) {
-    if (overwrite || !await fs.pathExists(this.getPath(key))) {
-      await fs.mkdirp(path.dirname(this.getPath(key)));
+    if (overwrite || !await pathExists(this.getPath(key))) {
+      await fs.mkdir(path.dirname(this.getPath(key)), { recursive: true });
       await fs.writeFile(this.getPath(key), data);
       return true;
     }
@@ -34,15 +43,15 @@ export default class LocalStore implements IFileStore {
   }
 
   public async hasFile(key: string) {
-    if (await fs.pathExists(this.getPath(key))) {
+    if (await pathExists(this.getPath(key))) {
       return (await fs.stat(this.getPath(key))).isFile();
     }
     return false;
   }
 
   public async deletePath(key: string) {
-    if (await fs.pathExists(this.getPath(key))) {
-      await fs.remove(this.getPath(key));
+    if (await pathExists(this.getPath(key))) {
+      await fs.rm(this.getPath(key), { recursive: true, force: true });
     }
   }
 
@@ -52,7 +61,7 @@ export default class LocalStore implements IFileStore {
 
   public async listFiles(prefix: string) {
     const files: string[] = [];
-    if (!await fs.pathExists(this.getPath(prefix))) return files;
+    if (!await pathExists(this.getPath(prefix))) return files;
     for (const child of await fs.readdir(this.getPath(prefix))) {
       const childPath = this.getPath(prefix, child);
       if ((await fs.stat(childPath)).isDirectory()) {

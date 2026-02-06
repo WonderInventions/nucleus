@@ -1,5 +1,5 @@
 import * as cp from 'child-process-promise';
-import * as fs from 'fs-extra';
+import * as fs from 'fs/promises';
 import * as path from 'path';
 import * as semver from 'semver';
 
@@ -7,6 +7,15 @@ import { gpgSign, gpgSignInline } from './gpg';
 import { syncDirectoryToStore } from './sync';
 import { withTmpDir } from './tmp';
 import * as config from '../../config';
+
+const pathExists = async (p: string): Promise<boolean> => {
+  try {
+    await fs.access(p);
+    return true;
+  } catch {
+    return false;
+  }
+};
 
 const getScanPackagesCommand = (dir: string, args: string[]): [string, string[]] => {
   if (process.platform === 'linux') {
@@ -72,7 +81,7 @@ APT::FTPArchive::Release::Description "${app.name}";`);
   await fs.writeFile(path.resolve(tmpDir, 'Release'), stdout);
   await gpgSign(path.resolve(tmpDir, 'Release'), path.resolve(tmpDir, 'Release.gpg'));
   await gpgSignInline(path.resolve(tmpDir, 'Release'), path.resolve(tmpDir, 'InRelease'));
-  await fs.remove(configFile);
+  await fs.rm(configFile, { force: true });
 };
 
 const writeAptMetadata = async (tmpDir: string, app: NucleusApp) => {
@@ -87,11 +96,11 @@ const writeAptMetadata = async (tmpDir: string, app: NucleusApp) => {
 
 export const initializeAptRepo = async (store: IFileStore, app: NucleusApp, channel: NucleusChannel) => {
   await withTmpDir(async (tmpDir) => {
-    await fs.mkdirs(path.resolve(tmpDir, 'binary'));
+    await fs.mkdir(path.resolve(tmpDir, 'binary'), { recursive: true });
     await writeAptMetadata(tmpDir, app);
     await syncDirectoryToStore(
       store,
-      path.posix.join(app.slug, channel.id, 'linux', 'debian'),
+      path.posix.join(app.slug, channel.id!, 'linux', 'debian'),
       tmpDir,
     );
   });
@@ -105,8 +114,8 @@ export const addFileToAptRepo = async (store: IFileStore, {
   fileData,
 }: HandlePlatformUploadOpts) => {
   await withTmpDir(async (tmpDir) => {
-    const storeKey = path.posix.join(app.slug, channel.id, 'linux', 'debian');
-    await fs.mkdirs(path.resolve(tmpDir, 'binary'));
+    const storeKey = path.posix.join(app.slug, channel.id!, 'linux', 'debian');
+    await fs.mkdir(path.resolve(tmpDir, 'binary'), { recursive: true });
 
     // Download any files belonging to the latest version *except* that we want to avoid redownloading
     // the same file we are adding
@@ -131,7 +140,7 @@ export const addFileToAptRepo = async (store: IFileStore, {
     }
 
     const binaryPath = path.resolve(tmpDir, 'binary', `${internalVersion.name}-${file.fileName}`);
-    if (await fs.pathExists(binaryPath)) {
+    if (await pathExists(binaryPath)) {
       throw new Error('Uploaded a duplicate file');
     }
     await fs.writeFile(binaryPath, fileData);

@@ -1,55 +1,92 @@
-import * as AWS from 'aws-sdk';
-import * as debug from 'debug';
+import {
+  S3Client,
+  HeadObjectCommand,
+  PutObjectCommand,
+  GetObjectCommand,
+  ListObjectsCommand,
+  DeleteObjectsCommand,
+} from '@aws-sdk/client-s3';
+
+import debug from 'debug';
 
 import { CloudFrontBatchInvalidator } from './CloudFrontBatchInvalidator';
 import * as config from '../../config';
 
 const d = debug('nucleus:s3');
 
-AWS.config.credentials = new AWS.EC2MetadataCredentials({
-  httpOptions: { timeout: 5000 },
-  maxRetries: 10,
-});
-
 export default class S3Store implements IFileStore {
+  private s3Client: S3Client | null = null;
+
   constructor(public s3Config = config.s3) {}
+
+  private getS3(): S3Client {
+    if (this.s3Client) {
+      return this.s3Client;
+    }
+
+    const options: ConstructorParameters<typeof S3Client>[0] = {};
+
+    if (this.s3Config.init) {
+      if (this.s3Config.init.endpoint) {
+        options.endpoint = this.s3Config.init.endpoint;
+      }
+      if (this.s3Config.init.s3ForcePathStyle) {
+        options.forcePathStyle = this.s3Config.init.s3ForcePathStyle;
+      }
+      if (this.s3Config.init.credentials) {
+        options.credentials = this.s3Config.init.credentials;
+      }
+      if (this.s3Config.init.region) {
+        options.region = this.s3Config.init.region;
+      }
+    }
+
+    this.s3Client = new S3Client(options);
+    return this.s3Client;
+  }
 
   public async hasFile(key: string) {
     const s3 = this.getS3();
-    return await new Promise<boolean>(resolve => s3.headObject({
-      Bucket: this.s3Config.bucketName,
-      Key: key,
-    }, (err) => {
-      if (err && err.code === 'NotFound') return resolve(false);
-      resolve(true);
-    }));
+    try {
+      await s3.send(new HeadObjectCommand({
+        Bucket: this.s3Config.bucketName,
+        Key: key,
+      }));
+      return true;
+    } catch (err: any) {
+      if (err.name === 'NotFound' || err.$metadata?.httpStatusCode === 404) {
+        return false;
+      }
+      return true;
+    }
   }
 
   public async getFileSize(key: string) {
     const s3 = this.getS3();
-    return await new Promise<number>(resolve => s3.headObject({
-      Bucket: this.s3Config.bucketName,
-      Key: key,
-    }, (err, info) => {
-      if (err && err.code === 'NotFound') return resolve(0);
-      resolve(info.ContentLength || 0);
-    }));
+    try {
+      const response = await s3.send(new HeadObjectCommand({
+        Bucket: this.s3Config.bucketName,
+        Key: key,
+      }));
+      return response.ContentLength || 0;
+    } catch (err: any) {
+      if (err.name === 'NotFound' || err.$metadata?.httpStatusCode === 404) {
+        return 0;
+      }
+      return 0;
+    }
   }
 
   public async putFile(key: string, data: Buffer, overwrite = false) {
     d(`Putting file: '${key}', overwrite=${overwrite ? 'true' : 'false'}`);
     const s3 = this.getS3();
-    const keyExists = async () => await this.hasFile(key);
     let wrote = false;
-    if (overwrite || !await keyExists()) {
+    if (overwrite || !await this.hasFile(key)) {
       d(`Deciding to write file (either because overwrite is enabled or the key didn't exist)`);
-      await new Promise((resolve, reject) => s3.putObject({
+      await s3.send(new PutObjectCommand({
         Bucket: this.s3Config.bucketName,
         Key: key,
         Body: data,
-      }, (err, data) => {
-        if (err) return reject(err);
-        resolve();
       }));
       wrote = true;
     }
@@ -61,19 +98,21 @@ export default class S3Store implements IFileStore {
 
   public async getFile(key: string) {
     d(`Fetching file: '${key}'`);
-    return await new Promise<Buffer>((resolve) => {
-      const s3 = this.getS3();
-      s3.getObject({
+    const s3 = this.getS3();
+    try {
+      const response = await s3.send(new GetObjectCommand({
         Bucket: this.s3Config.bucketName,
         Key: key,
-      }, (err, data) => {
-        if (err) {
-          d('File not found, defaulting to empty buffer');
-          return resolve(Buffer.from(''));
-        }
-        resolve(data.Body as Buffer);
-      });
-    });
+      }));
+      if (response.Body) {
+        const bytes = await response.Body.transformToByteArray();
+        return Buffer.from(bytes);
+      }
+      return Buffer.from('');
+    } catch (err) {
+      d('File not found, defaulting to empty buffer');
+      return Buffer.from('');
+    }
   }
 
   public async deletePath(key: string) {
@@ -81,16 +120,14 @@ export default class S3Store implements IFileStore {
     const s3 = this.getS3();
     const keys = await this.listFiles(key);
     d(`Found objects to delete: [${keys.join(', ')}]`);
-    await new Promise((resolve) => {
-      s3.deleteObjects({
+    if (keys.length > 0) {
+      await s3.send(new DeleteObjectsCommand({
         Bucket: this.s3Config.bucketName,
         Delete: {
-          Objects: keys.map(key => ({
-            Key: key,
-          })),
+          Objects: keys.map(k => ({ Key: k })),
         },
-      }, () => resolve());
-    });
+      }));
+    }
   }
 
   public async getPublicBaseUrl() {
@@ -110,21 +147,11 @@ export default class S3Store implements IFileStore {
   public async listFiles(prefix: string) {
     d(`Listing files under path: '${prefix}'`);
     const s3 = this.getS3();
-    const objects = await new Promise<AWS.S3.Object[]>((resolve) => {
-      s3.listObjects({
-        Bucket: this.s3Config.bucketName,
-        Prefix: prefix,
-      }, (err, data) => {
-        resolve(data.Contents);
-      });
-    });
-    return objects.map(object => object.Key).filter(key => !!key) as string[];
-  }
-
-  private getS3() {
-    if (this.s3Config.init) {
-      return new AWS.S3(this.s3Config.init);
-    }
-    return new AWS.S3();
+    const response = await s3.send(new ListObjectsCommand({
+      Bucket: this.s3Config.bucketName,
+      Prefix: prefix,
+    }));
+    const objects = response.Contents || [];
+    return objects.map(object => object.Key).filter((key): key is string => !!key);
   }
 }
