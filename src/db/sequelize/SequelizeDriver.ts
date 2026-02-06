@@ -1,5 +1,7 @@
 import { Sequelize } from 'sequelize-typescript';
 
+import * as semver from 'semver';
+
 import BaseDriver from '../BaseDriver';
 import getSequelize, { App, TeamMember, Channel, Version, File, TemporarySave, TemporarySaveFile, Migration } from './models';
 import { randomUUID } from 'crypto';
@@ -408,4 +410,52 @@ export default class SequelizeDriver extends BaseDriver {
           LIMIT 3) a
         );`);
   };
+
+  public async deleteOldDeadVersions(app: NucleusApp, channel: NucleusChannel, keepCount: number): Promise<NucleusVersion[]> {
+    await this.ensureConnected();
+    const rawChannel = await Channel.findOne<Channel>({
+      where: {
+        appId: parseInt(app.id!, 10),
+        stringId: channel.id,
+      },
+      include: [{
+        model: Version,
+        include: [File],
+      }],
+    });
+    if (!rawChannel || !rawChannel.versions) return [];
+
+    // Sort versions by semver descending
+    const sorted = [...rawChannel.versions].sort((a, b) => semver.rcompare(a.name, b.name));
+
+    // Skip the first keepCount versions, then collect dead ones from the rest
+    const candidates = sorted.slice(keepCount);
+    const toDelete = candidates.filter(v => v.dead);
+
+    if (toDelete.length === 0) return [];
+
+    const deletedVersions: NucleusVersion[] = [];
+    for (const version of toDelete) {
+      // Capture version info before destroying
+      deletedVersions.push(this.fixVersionStruct(version));
+
+      // Destroy associated files, then the version itself
+      for (const file of (version.files || [])) {
+        await file.destroy();
+      }
+      await version.destroy();
+    }
+
+    await this.writeVersionsFileToStore(app, channel);
+    return deletedVersions;
+  }
+
+  private fixVersionStruct(version: Version): NucleusVersion {
+    return {
+      name: version.name,
+      dead: version.dead,
+      rollout: version.rollout,
+      files: (version.files || []).map(f => f.get() as File).map(this.fixFileStruct),
+    };
+  }
 }

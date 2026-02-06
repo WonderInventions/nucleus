@@ -330,6 +330,51 @@ router.post('/:id/channel/:channelId/temporary_releases/delete_all', requireLogi
   res.json({ success: true, deleted: saves.length });
 }));
 
+router.post('/:id/channel/:channelId/released_versions/delete_old', requireLogin, noPendingMigrations, a(async (req, res) => {
+  if (stopNoPerms(req, res)) return;
+  const channel = await driver.getChannel(req.targetApp, param(req.params.channelId));
+  if (!channel) {
+    return res.status(404).json({
+      error: 'Channel not found',
+    });
+  }
+
+  if (!checkField(req, res, 'keepCount')) return;
+  const keepCount = parseInt(req.body.keepCount, 10);
+  if (isNaN(keepCount) || keepCount < 0) {
+    return res.status(400).json({ error: 'keepCount must be a non-negative number' });
+  }
+
+  const deletedVersions = await driver.deleteOldDeadVersions(req.targetApp, channel, keepCount);
+  if (deletedVersions.length === 0) {
+    return res.json({ success: true, deleted: 0 });
+  }
+
+  d(`User ${req.user ? req.user.id : "none"} deleting ${deletedVersions.length} old dead versions for app: '${req.targetApp.slug}' on channel: ${channel.name}`);
+
+  const positioner = new Positioner(store);
+  if (!(await positioner.withLock(req.targetApp, async (lock) => {
+    for (const version of deletedVersions) {
+      // Delete _index files for this version
+      await store.deletePath(`${req.targetApp.slug}/${channel.id}/_index/${version.name}`);
+
+      // Delete platform-specific files (win32, darwin) — skip linux repo files
+      for (const file of version.files) {
+        if (file.platform === 'win32' || file.platform === 'darwin') {
+          const platformPath = `${req.targetApp.slug}/${channel.id}/${file.platform}/${file.arch}/${file.fileName}`;
+          await store.deletePath(platformPath);
+        }
+      }
+    }
+  }))) {
+    return res.status(409).json({ error: 'Operation already in progress' });
+  }
+
+  await updateStaticReleaseMetaData(req.targetApp, channel);
+
+  res.json({ success: true, deleted: deletedVersions.length });
+}));
+
 router.post('/:id/channel/:channelId/temporary_releases/:temporarySaveId/delete', requireLogin, noPendingMigrations, a(async (req, res) => {
   if (stopNoPerms(req, res)) return;
   const channel = await driver.getChannel(req.targetApp, param(req.params.channelId));

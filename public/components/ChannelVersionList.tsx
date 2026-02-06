@@ -118,6 +118,13 @@ export default class ChannelVersionList extends React.PureComponent<ChannelVersi
     });
   }
 
+  private get hasOldDeadVersions() {
+    const versions = this.props.channel.versions;
+    const sorted = [...versions].sort((a, b) => semver.rcompare(a.name, b.name));
+    const old = sorted.slice(20);
+    return old.some(v => v.dead);
+  }
+
   getTabs = () => {
     return [{
       defaultSelected: true,
@@ -128,12 +135,25 @@ export default class ChannelVersionList extends React.PureComponent<ChannelVersi
             this.props.channel.versions.length === 0
             ? <h5>No Released Versions</h5>
             : (
-              this.props.channel.versions.map((version, index) => (
-                <div key={index} className={styles.versionSelect} onClick={this.showVersionModal(version)} style={{ color: version.dead ? 'red' : 'inherit', textDecoration: version.dead ? 'line-through' : '' }}>
-                  {version.name}
-                  <span className={styles.versionRolloutSuper}>{version.rollout}%</span>
-                </div>
-              ))
+              <div>
+                {this.hasOldDeadVersions && (
+                  <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 8 }}>
+                    <AkButton
+                      appearance="danger"
+                      onClick={this.deleteOldDeadVersions}
+                      isDisabled={this.state.actionRunning || this.props.hasPendingMigration}
+                    >
+                      Clean Up Old Versions
+                    </AkButton>
+                  </div>
+                )}
+                {this.props.channel.versions.map((version, index) => (
+                  <div key={index} className={styles.versionSelect} onClick={this.showVersionModal(version)} style={{ color: version.dead ? 'red' : 'inherit', textDecoration: version.dead ? 'line-through' : '' }}>
+                    {version.name}
+                    <span className={styles.versionRolloutSuper}>{version.rollout}%</span>
+                  </div>
+                ))}
+              </div>
             )
           }
         </div>
@@ -227,6 +247,24 @@ export default class ChannelVersionList extends React.PureComponent<ChannelVersi
       alert('An operation is already in progress, please wait a while and try again');
     }
     await this.fetch();
+    this.setState({ actionRunning: false });
+  }
+
+  private deleteOldDeadVersions = async () => {
+    if (!confirm('Are you sure you want to delete old dead versions? The 20 most recent versions will be kept.')) return;
+    this.setState({ actionRunning: true });
+    const headers = new Headers();
+    headers.append('Content-Type', 'application/json');
+    const response = await fetch(`/rest/app/${this.props.app.id}/channel/${this.props.channel.id}/released_versions/delete_old`, {
+      headers,
+      credentials: 'include',
+      method: 'POST',
+      body: JSON.stringify({ keepCount: 20 }),
+    });
+    if (response.status === 409) {
+      alert('An operation is already in progress, please wait a while and try again');
+    }
+    await this.props.updateApps(false);
     this.setState({ actionRunning: false });
   }
 

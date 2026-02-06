@@ -199,5 +199,5 @@ MQ==
 -----END PGP PRIVATE KEY BLOCK-----
 `,
 
-  defaultRollout: 0,
+  defaultRollout: 100,
 };
