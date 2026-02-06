@@ -205,6 +205,9 @@ export default async function () {
     port: config.sequelize.port,
     storage: config.sequelize.storage,
     logging: false,
+    define: {
+      freezeTableName: true,
+    },
   });
 
   sequelize.addModels([
