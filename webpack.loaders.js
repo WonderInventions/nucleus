@@ -102,7 +102,12 @@ module.exports = [
         }
       },
       'postcss-loader',
-      'sass-loader',
+      {
+        loader: 'sass-loader',
+        options: {
+          api: 'modern',
+        },
+      },
     ],
   },
   {
