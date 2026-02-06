@@ -16,7 +16,7 @@ const param = (value: string | string[] | undefined): string => {
 const d = debug('nucleus:rest:migrations');
 const a = createA(d);
 
-const migrationRouter = express();
+const migrationRouter = express.Router();
 
 migrationRouter.use('/:key', requireAdmin, a(async (req, res, next) => {
   const migration = MigrationStore.get(param(req.params.key));

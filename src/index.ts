@@ -55,7 +55,7 @@ app.use((req: Request, res: Response, next: NextFunction) => {
   next();
 });
 
-const restRouter = express();
+const restRouter = express.Router();
 restRouter.get('/deepcheck', async (req: Request, res: Response) => {
   d('Running DeepCheck');
   const dead = (reason: string) => {

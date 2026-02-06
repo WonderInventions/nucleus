@@ -9,7 +9,7 @@ import store from '../files/store';
 const d = debug('nucleus:rest:admin');
 const a = createA(d);
 
-const adminRouter = express();
+const adminRouter = express.Router();
 
 adminRouter.get('/release-locks', a(async (req, res) => {
   const apps = await driver.getApps();

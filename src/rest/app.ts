@@ -19,7 +19,7 @@ const param = (value: string | string[] | undefined): string => {
 };
 
 const d = debug('nucleus:rest');
-const router = express();
+const router = express.Router();
 const a = createA(d);
 const upload = multer();
 
