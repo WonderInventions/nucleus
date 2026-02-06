@@ -55,23 +55,25 @@ describe('channel endpoints', { timeout: 60000 }, () => {
           'should create the versions.json file for the channel',
         );
 
-        assert.strictEqual(
-          await helpers.store.hasFile(`${app.slug}/${response.body.id}/linux/${app.slug}.repo`),
-          true,
-          'should create the redhat repo file',
-        );
+        if (process.platform === 'linux') {
+          assert.strictEqual(
+            await helpers.store.hasFile(`${app.slug}/${response.body.id}/linux/${app.slug}.repo`),
+            true,
+            'should create the redhat repo file',
+          );
 
-        assert.strictEqual(
-          await helpers.store.hasFile(`${app.slug}/${response.body.id}/linux/debian/binary/Release`),
-          true,
-          'should create the debian apt repo metadata',
-        );
+          assert.strictEqual(
+            await helpers.store.hasFile(`${app.slug}/${response.body.id}/linux/debian/binary/Release`),
+            true,
+            'should create the debian apt repo metadata',
+          );
 
-        assert.strictEqual(
-          await helpers.store.hasFile(`${app.slug}/${response.body.id}/linux/redhat/repodata/repomd.xml`),
-          true,
-          'should create the redhat yum repo metadata',
-        );
+          assert.strictEqual(
+            await helpers.store.hasFile(`${app.slug}/${response.body.id}/linux/redhat/repodata/repomd.xml`),
+            true,
+            'should create the redhat yum repo metadata',
+          );
+        }
       });
 
       it('should persist the created channel in the /app/:id endpoint', async () => {

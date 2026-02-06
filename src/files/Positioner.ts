@@ -12,6 +12,9 @@ import { updateWin32ReleasesFiles } from './utils/win32';
 const VALID_WINDOWS_SUFFIX = ['-full.nupkg', '-delta.nupkg', '.exe', '.msi'];
 const VALID_DARWIN_SUFFIX = ['.dmg', '.zip', '.pkg'];
 const CIPHER_MODE = 'aes-256-ctr';
+const IV_LENGTH = 16;
+const KEY_LENGTH = 32;
+const SCRYPT_SALT = process.env.NUCLEUS_SCRYPT_SALT || 'nucleus-temp-file';
 
 const d = debug('nucleus:positioner');
 
@@ -32,17 +35,22 @@ export default class Positioner {
    */
   public async saveTemporaryFile(app: NucleusApp, saveString: string, fileName: string, data: Buffer, cipherPassword: string) {
     d(`Saving temporary file: ${saveString}/${fileName} for app: ${app.slug}`);
-    const key = path.join(app.slug, 'temp', saveString, fileName);
-    const cipher = crypto.createCipher(CIPHER_MODE, cipherPassword);
-    const cryptedBuffer = Buffer.concat([cipher.update(data), cipher.final()]);
-    await this.store.putFile(key, cryptedBuffer);
+    const storeKey = path.join(app.slug, 'temp', saveString, fileName);
+    const derivedKey = crypto.scryptSync(cipherPassword, SCRYPT_SALT, KEY_LENGTH);
+    const iv = crypto.randomBytes(IV_LENGTH);
+    const cipher = crypto.createCipheriv(CIPHER_MODE, derivedKey, iv);
+    const cryptedBuffer = Buffer.concat([iv, cipher.update(data), cipher.final()]);
+    await this.store.putFile(storeKey, cryptedBuffer);
   }
 
   public async getTemporaryFile(app: NucleusApp, saveString: string, fileName: string, cipherPassword: string) {
     d(`Fetching temporary file: ${saveString}/${fileName} for app: ${app.slug}`);
-    const key = path.join(app.slug, 'temp', saveString, fileName);
-    const decipher = crypto.createDecipher(CIPHER_MODE, cipherPassword);
-    const data = await this.store.getFile(key);
+    const storeKey = path.join(app.slug, 'temp', saveString, fileName);
+    const derivedKey = crypto.scryptSync(cipherPassword, SCRYPT_SALT, KEY_LENGTH);
+    const raw = await this.store.getFile(storeKey);
+    const iv = raw.subarray(0, IV_LENGTH);
+    const data = raw.subarray(IV_LENGTH);
+    const decipher = crypto.createDecipheriv(CIPHER_MODE, derivedKey, iv);
     return Buffer.concat([decipher.update(data), decipher.final()]);
   }
 
@@ -286,8 +294,10 @@ export default class Positioner {
   }
 
   public initializeStructure = async (app: NucleusApp, channel: NucleusChannel) => {
-    await initializeYumRepo(this.store, app, channel);
-    await initializeAptRepo(this.store, app, channel);
+    if (process.platform === 'linux') {
+      await initializeYumRepo(this.store, app, channel);
+      await initializeAptRepo(this.store, app, channel);
+    }
     await this.store.putFile(path.posix.join(app.slug, channel.id!, 'versions.json'), Buffer.from(JSON.stringify([])));
   }
 }

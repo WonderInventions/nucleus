@@ -26,9 +26,9 @@
     "start:server:dev": "nodemon --watch src --exec \"npm run build:server && cross-env DEBUG=nucleus* npm run start:server:prod\" -e ts",
     "start:server:prod": "node lib/index.js",
     "start:static": "make-dir .files && serve .files --port 9999 --silent",
-    "test": "NODE_ENV=test tsx --test src/**/__spec__/*_spec.ts src/**/**/__spec__/*_spec.ts",
+    "test": "NODE_ENV=test tsx --test --test-concurrency=1 src/**/__spec__/*_spec.ts src/**/**/__spec__/*_spec.ts",
     "test:unit": "NODE_ENV=test tsx --test 'src/files/__spec__/*_spec.ts' 'src/files/**/__spec__/*_spec.ts'",
-    "test:integration": "NODE_ENV=test tsx --test --test-force-exit src/__spec__/*_spec.ts"
+    "test:integration": "NODE_ENV=test tsx --test --test-concurrency=1 --test-force-exit src/__spec__/*_spec.ts"
   },
   "author": "Samuel Attard",
   "license": "Apache-2.0",

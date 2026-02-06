@@ -146,11 +146,22 @@ export default class ChannelVersionList extends React.PureComponent<ChannelVersi
             this.state.temporaryVersions.length === 0
             ? <h5>No Draft Versions</h5>
             : (
-              this.state.temporaryVersions.map((version, index) => (
-                <div key={index} className={styles.versionSelect} onClick={this.showDraftVersionModal(version)}>
-                  {version.version}
+              <div>
+                <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 8 }}>
+                  <AkButton
+                    appearance="danger"
+                    onClick={this.deleteAllDrafts}
+                    isDisabled={this.state.actionRunning || this.props.hasPendingMigration}
+                  >
+                    Delete All Drafts
+                  </AkButton>
                 </div>
-              ))
+                {this.state.temporaryVersions.map((version, index) => (
+                  <div key={index} className={styles.versionSelect} onClick={this.showDraftVersionModal(version)}>
+                    {version.version}
+                  </div>
+                ))}
+              </div>
             )
           }
         </div>
@@ -201,6 +212,22 @@ export default class ChannelVersionList extends React.PureComponent<ChannelVersi
         modalOpen: false,
       });
     }
+  }
+
+  private deleteAllDrafts = async () => {
+    const count = this.state.temporaryVersions.length;
+    if (count === 0) return;
+    if (!confirm(`Are you sure you want to delete all ${count} draft(s)?`)) return;
+    this.setState({ actionRunning: true });
+    const response = await fetch(`/rest/app/${this.props.app.id}/channel/${this.props.channel.id}/temporary_releases/delete_all`, {
+      credentials: 'include',
+      method: 'POST',
+    });
+    if (response.status === 409) {
+      alert('An operation is already in progress, please wait a while and try again');
+    }
+    await this.fetch();
+    this.setState({ actionRunning: false });
   }
 
   private delete = async () => {

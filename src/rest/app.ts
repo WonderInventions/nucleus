@@ -302,6 +302,34 @@ router.post('/:id/channel/:channelId/temporary_releases/:temporarySaveId/release
   res.json({ success: true });
 }));
 
+router.post('/:id/channel/:channelId/temporary_releases/delete_all', requireLogin, noPendingMigrations, a(async (req, res) => {
+  if (stopNoPerms(req, res)) return;
+  const channel = await driver.getChannel(req.targetApp, param(req.params.channelId));
+  if (!channel) {
+    return res.status(404).json({
+      error: 'Channel not found',
+    });
+  }
+
+  const saves = await driver.getTemporarySaves(req.targetApp, channel);
+  if (saves.length === 0) {
+    return res.json({ success: true, deleted: 0 });
+  }
+
+  d(`User ${req.user ? req.user.id : "none"} deleting all ${saves.length} temporary releases for app: '${req.targetApp.slug}' on channel: ${channel.name}`);
+  const positioner = new Positioner(store);
+  if (!(await positioner.withLock(req.targetApp, async (lock) => {
+    for (const save of saves) {
+      await positioner.cleanUpTemporaryFile(lock, req.targetApp, save.saveString);
+      await driver.deleteTemporarySave(save);
+    }
+  }))) {
+    return res.status(409).json({ error: 'Operation already in progress' });
+  }
+
+  res.json({ success: true, deleted: saves.length });
+}));
+
 router.post('/:id/channel/:channelId/temporary_releases/:temporarySaveId/delete', requireLogin, noPendingMigrations, a(async (req, res) => {
   if (stopNoPerms(req, res)) return;
   const channel = await driver.getChannel(req.targetApp, param(req.params.channelId));
