@@ -9,7 +9,7 @@ import AkTabs from '@atlaskit/tabs';
 import DownloadIcon from '@atlaskit/icon/glyph/download';
 import WarningIcon from '@atlaskit/icon/glyph/warning';
 
-import * as styles from './ChannelVersionList.scss';
+import styles from './ChannelVersionList.scss';
 
 export interface ChannelVersionListProps {
   app: NucleusApp;

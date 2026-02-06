@@ -93,6 +93,7 @@ module.exports = [
       {
         loader: 'css-loader',
         options: {
+          esModule: false,
           modules: {
             localIdentName: '[path]___[name]__[local]___[hash:base64:5]'
           },
@@ -112,6 +113,7 @@ module.exports = [
       {
         loader: 'css-loader',
         options: {
+          esModule: false,
           modules: {
             localIdentName: '[path]___[name]__[local]___[hash:base64:5]'
           },

@@ -9,7 +9,7 @@ import WarningIcon from '@atlaskit/icon/glyph/warning';
 
 import WebHookLogsModal from './WebHookLogsModal';
 
-import * as styles from './WebHookManagement.scss';
+import styles from './WebHookManagement.scss';
 
 export interface WebHookManagementProps {
   app: NucleusApp;

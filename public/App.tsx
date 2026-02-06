@@ -12,7 +12,7 @@ import MigrationList from './components/MigrationList';
 
 import AkSpinner from '@atlaskit/spinner';
 
-import * as styles from './App.scss';
+import styles from './App.scss';
 
 class App extends React.PureComponent<{
   user: {

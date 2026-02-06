@@ -35,6 +35,15 @@ config.optimization = {
   ],
 };
 
+// Replace style-loader with MiniCssExtractPlugin.loader for production
+config.module.rules.forEach(rule => {
+  if (rule.use && Array.isArray(rule.use)) {
+    rule.use = rule.use.map(loader =>
+      loader === 'style-loader' ? MiniCssExtractPlugin.loader : loader
+    );
+  }
+});
+
 // Add production plugins
 config.plugins.unshift(
   new webpack.DefinePlugin({

@@ -4,7 +4,7 @@ import { connect } from 'react-redux';
 import AkButton from '@atlaskit/button';
 import AkSpinner from '@atlaskit/spinner';
 
-import * as styles from './MigrationList.scss';
+import styles from './MigrationList.scss';
 
 interface MigrationListReduxProps {
   migrations: MigrationSubState;

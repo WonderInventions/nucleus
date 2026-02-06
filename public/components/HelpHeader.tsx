@@ -3,7 +3,7 @@ import * as React from 'react';
 import AkInlineDialog from '@atlaskit/inline-dialog';
 import QuestionIcon from '@atlaskit/icon/glyph/question-circle';
 
-import * as styles from './HelpHeader.scss';
+import styles from './HelpHeader.scss';
 
 export interface HelpHeaderProps {
   help: React.ReactNode;

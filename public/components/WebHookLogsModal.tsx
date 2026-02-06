@@ -9,7 +9,7 @@ import AkSpinner from '@atlaskit/spinner';
 
 import { fetchApps, setApps } from '../actions/apps';
 
-import * as styles from './WebHookLogsModal.scss';
+import styles from './WebHookLogsModal.scss';
 
 /* tslint:disable */
 const AkFieldText = AkFieldTextExported as any;

@@ -9,7 +9,7 @@ import CreateAppModal from './CreateAppModal';
 import UserDropDown from './UserDropDown';
 import Logo from '../assets/Logo';
 
-import * as styles from './PageWrapper.scss';
+import styles from './PageWrapper.scss';
 
 function PageWrapper() {
   const [creatingApp, setCreatingApp] = React.useState(false);

@@ -6,7 +6,7 @@ import PageLoader from './PageLoader';
 
 import { fetchApps, setApps } from '../actions/apps';
 
-import * as styles from './AppList.scss';
+import styles from './AppList.scss';
 
 interface AppListReduxProps {
   apps: AppsSubState;

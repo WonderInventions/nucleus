@@ -17,7 +17,7 @@ import WebHookManagement from './WebHookManagement';
 
 import { fetchApps, setApps } from '../actions/apps';
 
-import * as styles from './AppPage.scss';
+import styles from './AppPage.scss';
 
 import 'highlight.js/styles/vs.css';
 
