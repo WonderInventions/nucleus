@@ -130,12 +130,23 @@ export default class S3Store implements IFileStore {
     const keys = await this.listFiles(key);
     d(`Found objects to delete: [${keys.join(', ')}]`);
     for (let i = 0; i < keys.length; i += MAX_DELETE_BATCH) {
-      await s3.send(new DeleteObjectsCommand({
+      const response = await s3.send(new DeleteObjectsCommand({
         Bucket: this.s3Config.bucketName,
         Delete: {
           Objects: keys.slice(i, i + MAX_DELETE_BATCH).map(k => ({ Key: k })),
         },
       }));
+      // DeleteObjects reports per-key failures in a 200 response; treat them
+      // as errors so callers never mistake a partial delete for success
+      if (response.Errors && response.Errors.length > 0) {
+        console.error(JSON.stringify({
+          message: 'Some objects failed to delete',
+          bucket: this.s3Config.bucketName,
+          path: key,
+          errors: response.Errors.map(e => ({ key: e.Key, code: e.Code, error: e.Message })),
+        }));
+        throw new Error(`Failed to delete ${response.Errors.length} object(s) under '${key}' in bucket '${this.s3Config.bucketName}'`);
+      }
     }
   }
 

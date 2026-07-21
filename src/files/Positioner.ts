@@ -68,30 +68,49 @@ export default class Positioner {
    * non-dead versions on every linux upload, and only dead versions can be
    * deleted, so the metadata no longer references these package files.
    */
-  public async cleanUpDeletedVersionFiles(lock: PositionerLock, app: NucleusApp, channel: NucleusChannel, versions: NucleusVersion[]) {
-    if (lock !== await this.currentLock(app)) return;
+  public async cleanUpDeletedVersionFiles(lock: PositionerLock, app: NucleusApp, channel: NucleusChannel, versions: NucleusVersion[]): Promise<boolean> {
+    if (lock !== await this.currentLock(app)) {
+      console.warn(JSON.stringify({
+        message: 'Skipped deleting stored files for deleted versions, the given lock is not current',
+        app: app.slug,
+        channel: channel.id,
+        versions: versions.map(v => v.name),
+      }));
+      return false;
+    }
     for (const version of versions) {
-      d(`Deleting all files for app: ${app.slug} on channel: ${channel.id} for version: ${version.name}`);
-      await this.store.deletePath(path.posix.join(app.slug, channel.id!, '_index', version.name));
+      const paths = [path.posix.join(app.slug, channel.id!, '_index', version.name)];
 
       for (const file of version.files || []) {
         switch (file.platform) {
           case 'win32':
           case 'darwin':
-            await this.store.deletePath(path.posix.join(app.slug, channel.id!, file.platform, file.arch, file.fileName));
+            paths.push(path.posix.join(app.slug, channel.id!, file.platform, file.arch, file.fileName));
             break;
           case 'linux':
             if (file.fileName.endsWith('.deb')) {
-              await this.store.deletePath(getAptPackageKey(app, channel, version.name, file.fileName));
+              paths.push(getAptPackageKey(app, channel, version.name, file.fileName));
             } else if (file.fileName.endsWith('.rpm')) {
-              await this.store.deletePath(getYumPackageKey(app, channel, version.name, file.fileName));
+              paths.push(getYumPackageKey(app, channel, version.name, file.fileName));
             }
             break;
           default:
             break;
         }
       }
+
+      console.log(JSON.stringify({
+        message: 'Deleting stored files for deleted version',
+        app: app.slug,
+        channel: channel.id,
+        version: version.name,
+        paths,
+      }));
+      for (const deletePath of paths) {
+        await this.store.deletePath(deletePath);
+      }
     }
+    return true;
   }
 
   /**

@@ -263,6 +263,8 @@ export default class ChannelVersionList extends React.PureComponent<ChannelVersi
     });
     if (response.status === 409) {
       alert('An operation is already in progress, please wait a while and try again');
+    } else if (!response.ok) {
+      alert('Deleting old versions failed part way through. It is safe to retry, the server logs have details.');
     }
     await this.props.updateApps(false);
     this.setState({ actionRunning: false });

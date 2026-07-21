@@ -233,6 +233,17 @@ describe('S3Store', () => {
       assert.strictEqual(calls.length, 0);
     });
 
+    it('should throw when the delete response contains per-key errors', async () => {
+      s3Mock.on(ListObjectsV2Command).resolves({
+        Contents: [{ Key: 'prefix/file1.txt' }],
+      });
+      s3Mock.on(DeleteObjectsCommand).resolves({
+        Errors: [{ Key: 'prefix/file1.txt', Code: 'InternalError', Message: 'We encountered an internal error.' }],
+      });
+
+      await assert.rejects(store.deletePath('prefix'), /Failed to delete 1 object\(s\) under 'prefix'/);
+    });
+
     it('should chunk deletes into batches of at most 1000 keys', async () => {
       const keys = Array.from({ length: 1500 }, (_, i) => ({ Key: `prefix/file${i}.txt` }));
       s3Mock.on(ListObjectsV2Command).resolves({ Contents: keys });

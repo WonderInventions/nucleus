@@ -31,7 +31,8 @@ export abstract class IDBDriver {
   public abstract storeSHAs(file: NucleusFile, hashes: HashSet): Promise<NucleusFile | null>;
 
   public abstract markOldVersionsAsDead(channel:NucleusChannel): Promise<void>;
-  public abstract deleteOldDeadVersions(app: NucleusApp, channel: NucleusChannel, keepCount: number): Promise<NucleusVersion[]>;
+  public abstract getOldDeadVersions(app: NucleusApp, channel: NucleusChannel, keepCount: number): Promise<NucleusVersion[]>;
+  public abstract deleteVersions(app: NucleusApp, channel: NucleusChannel, versions: NucleusVersion[]): Promise<void>;
 }
 
 export default abstract class BaseDriver extends IDBDriver {

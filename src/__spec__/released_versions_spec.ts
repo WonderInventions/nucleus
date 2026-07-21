@@ -189,5 +189,51 @@ describe('released_versions endpoints', { timeout: 120000 }, () => {
 
       assert.strictEqual(response.status, 400);
     });
+
+    it('should leave the database untouched when the app lock cannot be obtained', async () => {
+      // We have 4.0.0, 5.0.0, 6.0.0, 7.0.0 (7.0.0 at 100% rollout)
+      await markDead('4.0.0');
+
+      // Hold the app lock, as a concurrent release would
+      await helpers.store.putFile(`${app.slug}/.lock`, Buffer.from('held-by-another-operation'));
+      try {
+        const response = await helpers.request
+          .post(`/app/${app.id}/channel/${channel.id}/released_versions/delete_old`)
+          .send({ keepCount: 0 });
+
+        assert.strictEqual(response.status, 409);
+
+        const currentApp = await getApp();
+        const ch = currentApp.channels.find(c => c.id === channel.id)!;
+        assert.ok(
+          ch.versions.some(v => v.name === '4.0.0'),
+          'Version 4.0.0 should still be in the database after a 409',
+        );
+        assert.strictEqual(
+          await helpers.store.hasFile(`${app.slug}/${channel.id}/_index/4.0.0/darwin/x64/test-app-4.0.0.zip`),
+          true,
+          'Files for 4.0.0 should be untouched after a 409',
+        );
+      } finally {
+        await helpers.store.deletePath(`${app.slug}/.lock`);
+      }
+
+      // With the lock released the retry succeeds and cleans up fully
+      const retryResponse = await helpers.request
+        .post(`/app/${app.id}/channel/${channel.id}/released_versions/delete_old`)
+        .send({ keepCount: 0 });
+
+      assert.strictEqual(retryResponse.status, 200);
+      assert.strictEqual(retryResponse.body.deleted, 1);
+
+      const currentApp = await getApp();
+      const ch = currentApp.channels.find(c => c.id === channel.id)!;
+      assert.ok(!ch.versions.some(v => v.name === '4.0.0'), 'Version 4.0.0 should be deleted on retry');
+      assert.strictEqual(
+        await helpers.store.hasFile(`${app.slug}/${channel.id}/_index/4.0.0/darwin/x64/test-app-4.0.0.zip`),
+        false,
+        'Files for 4.0.0 should be deleted on retry',
+      );
+    });
   });
 });
