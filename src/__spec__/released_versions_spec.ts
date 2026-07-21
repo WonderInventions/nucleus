@@ -119,6 +119,18 @@ describe('released_versions endpoints', { timeout: 120000 }, () => {
         'Index file for 2.0.0 should be deleted',
       );
 
+      // Verify platform artifacts are cleaned up
+      assert.strictEqual(
+        await helpers.store.hasFile(`${app.slug}/${channel.id}/darwin/x64/test-app-1.0.0.zip`),
+        false,
+        'Platform file for 1.0.0 should be deleted',
+      );
+      assert.strictEqual(
+        await helpers.store.hasFile(`${app.slug}/${channel.id}/darwin/x64/test-app-2.0.0.zip`),
+        false,
+        'Platform file for 2.0.0 should be deleted',
+      );
+
       // Verify kept versions still have their files
       assert.strictEqual(
         await helpers.store.hasFile(`${app.slug}/${channel.id}/_index/3.0.0/darwin/x64/test-app-3.0.0.zip`),

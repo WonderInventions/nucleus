@@ -354,18 +354,7 @@ router.post('/:id/channel/:channelId/released_versions/delete_old', requireLogin
 
   const positioner = new Positioner(store);
   if (!(await positioner.withLock(req.targetApp, async (lock) => {
-    for (const version of deletedVersions) {
-      // Delete _index files for this version
-      await store.deletePath(`${req.targetApp.slug}/${channel.id}/_index/${version.name}`);
-
-      // Delete platform-specific files (win32, darwin) — skip linux repo files
-      for (const file of version.files) {
-        if (file.platform === 'win32' || file.platform === 'darwin') {
-          const platformPath = `${req.targetApp.slug}/${channel.id}/${file.platform}/${file.arch}/${file.fileName}`;
-          await store.deletePath(platformPath);
-        }
-      }
-    }
+    await positioner.cleanUpDeletedVersionFiles(lock, req.targetApp, channel, deletedVersions);
   }))) {
     return res.status(409).json({ error: 'Operation already in progress' });
   }

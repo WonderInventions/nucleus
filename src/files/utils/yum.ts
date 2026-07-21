@@ -96,6 +96,9 @@ const signAllRpmFiles = async (dir: string) => {
   }
 };
 
+export const getYumPackageKey = (app: NucleusApp, channel: NucleusChannel, versionName: string, fileName: string) =>
+  path.posix.join(app.slug, channel.id!, 'linux', 'redhat', `${versionName}-${fileName}`);
+
 export const initializeYumRepo = async (store: IFileStore, app: NucleusApp, channel: NucleusChannel) => {
   await withTmpDir(async (tmpDir) => {
     const [exe, args] = getCreateRepoCommand(tmpDir, ['-v', '--no-database', './']);
@@ -128,8 +131,9 @@ export const addFileToYumRepo = async (store: IFileStore, {
         const versionFile = (version.files || []).find((f) => f.fileName.endsWith(".rpm") && f.platform === "linux");
         if (versionFile && versionFile.fileName !== file.fileName) {
           const fname = `${version.name}-${versionFile.fileName}`;
-          if (await store.getFileSize(`${storeKey}/${fname}`)) {
-            await fs.writeFile(`${tmpDir}/${fname}`, await store.getFile(`${storeKey}/${fname}`));
+          const packageKey = getYumPackageKey(app, channel, version.name, versionFile.fileName);
+          if (await store.getFileSize(packageKey)) {
+            await fs.writeFile(`${tmpDir}/${fname}`, await store.getFile(packageKey));
           }
         }
       }

@@ -4,8 +4,8 @@ import debug from 'debug';
 import * as path from 'path';
 import * as semver from 'semver';
 
-import { initializeAptRepo, addFileToAptRepo } from './utils/apt';
-import { initializeYumRepo, addFileToYumRepo } from './utils/yum';
+import { initializeAptRepo, addFileToAptRepo, getAptPackageKey } from './utils/apt';
+import { initializeYumRepo, addFileToYumRepo, getYumPackageKey } from './utils/yum';
 import { updateDarwinReleasesFiles } from './utils/darwin';
 import { updateWin32ReleasesFiles } from './utils/win32';
 
@@ -58,6 +58,40 @@ export default class Positioner {
     if (lock !== await this.currentLock(app)) return;
     d(`Deleting all temporary files for app: ${app.slug} in save ID: ${saveString}`);
     await this.store.deletePath(path.join(app.slug, 'temp', saveString));
+  }
+
+  /**
+   * Delete every stored file for versions that have been deleted from the database:
+   * the _index tree, win32/darwin artifacts and the linux apt/yum package files.
+   *
+   * The apt/yum repo metadata is not touched here: it is regenerated from only
+   * non-dead versions on every linux upload, and only dead versions can be
+   * deleted, so the metadata no longer references these package files.
+   */
+  public async cleanUpDeletedVersionFiles(lock: PositionerLock, app: NucleusApp, channel: NucleusChannel, versions: NucleusVersion[]) {
+    if (lock !== await this.currentLock(app)) return;
+    for (const version of versions) {
+      d(`Deleting all files for app: ${app.slug} on channel: ${channel.id} for version: ${version.name}`);
+      await this.store.deletePath(path.posix.join(app.slug, channel.id!, '_index', version.name));
+
+      for (const file of version.files || []) {
+        switch (file.platform) {
+          case 'win32':
+          case 'darwin':
+            await this.store.deletePath(path.posix.join(app.slug, channel.id!, file.platform, file.arch, file.fileName));
+            break;
+          case 'linux':
+            if (file.fileName.endsWith('.deb')) {
+              await this.store.deletePath(getAptPackageKey(app, channel, version.name, file.fileName));
+            } else if (file.fileName.endsWith('.rpm')) {
+              await this.store.deletePath(getYumPackageKey(app, channel, version.name, file.fileName));
+            }
+            break;
+          default:
+            break;
+        }
+      }
+    }
   }
 
   /**

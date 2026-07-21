@@ -715,6 +715,47 @@ describe('Positioner', () => {
     });
   });
 
+  describe('cleanUpDeletedVersionFiles', () => {
+    const deletedVersion: NucleusVersion = {
+      name: '0.0.2',
+      dead: true,
+      rollout: 100,
+      files: [
+        { ...generateSHAs(Buffer.from('')), fileName: 'thing.exe', arch: 'x64', platform: 'win32', type: 'installer' },
+        { ...generateSHAs(Buffer.from('')), fileName: 'thing.dmg', arch: 'arm64', platform: 'darwin', type: 'installer' },
+        { ...generateSHAs(Buffer.from('')), fileName: 'thing.deb', arch: 'x64', platform: 'linux', type: 'installer' },
+        { ...generateSHAs(Buffer.from('')), fileName: 'thing.rpm', arch: 'x64', platform: 'linux', type: 'installer' },
+      ],
+    };
+
+    it('should delete the _index tree for each deleted version', async () => {
+      await positioner.cleanUpDeletedVersionFiles(lock, fakeApp, fakeChannel, [deletedVersion]);
+      assert.ok(fakeStore.deletePath.calledWith('fake_slug/fake_channel_id/_index/0.0.2'));
+    });
+
+    it('should delete win32 and darwin platform artifacts', async () => {
+      await positioner.cleanUpDeletedVersionFiles(lock, fakeApp, fakeChannel, [deletedVersion]);
+      assert.ok(fakeStore.deletePath.calledWith('fake_slug/fake_channel_id/win32/x64/thing.exe'));
+      assert.ok(fakeStore.deletePath.calledWith('fake_slug/fake_channel_id/darwin/arm64/thing.dmg'));
+    });
+
+    it('should delete linux apt and yum package files', async () => {
+      await positioner.cleanUpDeletedVersionFiles(lock, fakeApp, fakeChannel, [deletedVersion]);
+      assert.ok(fakeStore.deletePath.calledWith('fake_slug/fake_channel_id/linux/debian/binary/0.0.2-thing.deb'));
+      assert.ok(fakeStore.deletePath.calledWith('fake_slug/fake_channel_id/linux/redhat/0.0.2-thing.rpm'));
+    });
+
+    it('should delete exactly one path per file plus the _index tree', async () => {
+      await positioner.cleanUpDeletedVersionFiles(lock, fakeApp, fakeChannel, [deletedVersion]);
+      assert.strictEqual(fakeStore.deletePath.callCount, 5);
+    });
+
+    it('should delete nothing without a valid lock', async () => {
+      await positioner.cleanUpDeletedVersionFiles('not-the-lock', fakeApp, fakeChannel, [deletedVersion]);
+      assert.strictEqual(fakeStore.deletePath.callCount, 0);
+    });
+  });
+
   describe('locking', () => {
     beforeEach(() => {
       const files: {

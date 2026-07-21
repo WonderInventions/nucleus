@@ -94,6 +94,9 @@ const writeAptMetadata = async (tmpDir: string, app: NucleusApp) => {
   await generateReleaseFile(path.resolve(tmpDir, 'binary'), app);
 };
 
+export const getAptPackageKey = (app: NucleusApp, channel: NucleusChannel, versionName: string, fileName: string) =>
+  path.posix.join(app.slug, channel.id!, 'linux', 'debian', 'binary', `${versionName}-${fileName}`);
+
 export const initializeAptRepo = async (store: IFileStore, app: NucleusApp, channel: NucleusChannel) => {
   await withTmpDir(async (tmpDir) => {
     await fs.mkdir(path.resolve(tmpDir, 'binary'), { recursive: true });
@@ -134,7 +137,7 @@ export const addFileToAptRepo = async (store: IFileStore, {
       for (const otherFile of latestVersionFiles) {
         if (otherFile.fileName !== file.fileName || internalVersion.name !== latestVersion.name) {
           const fname = `${latestVersion.name}-${otherFile.fileName}`;
-          await fs.writeFile(`${tmpDir}/binary/${fname}`, await store.getFile(`${storeKey}/binary/${fname}`));
+          await fs.writeFile(`${tmpDir}/binary/${fname}`, await store.getFile(getAptPackageKey(app, channel, latestVersion.name, otherFile.fileName)));
         }
       }
     }
