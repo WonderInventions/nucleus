@@ -3,7 +3,6 @@ import { CloudFrontClient, CreateInvalidationCommand } from '@aws-sdk/client-clo
 import debug from 'debug';
 
 import S3Store from './S3Store';
-import * as config from '../../config';
 
 const d = debug('nucleus:s3:cloudfront-invalidator');
 
@@ -25,19 +24,23 @@ export class CloudFrontBatchInvalidator {
       return CloudFrontBatchInvalidator.noopInvalidator;
     }
     if (!invalidators[store.s3Config.cloudfront.distributionId]) {
-      invalidators[store.s3Config.cloudfront.distributionId] = new CloudFrontBatchInvalidator(store.s3Config.cloudfront);
+      invalidators[store.s3Config.cloudfront.distributionId] = new CloudFrontBatchInvalidator(store.s3Config);
     }
     return invalidators[store.s3Config.cloudfront.distributionId];
   }
 
-  private constructor(private cloudfrontConfig: S3Options['cloudfront']) {
-    if (cloudfrontConfig) {
+  // The full owning store's config is kept (not just the cloudfront section) so
+  // the CloudFront client is built from that store's credentials/region rather
+  // than the global config, which may describe a different store entirely when
+  // dual-writing
+  private constructor(private s3Config: S3Options | null) {
+    if (s3Config && s3Config.cloudfront) {
       this.queueUp();
     }
   }
 
   public addToBatch = (key: string) => {
-    if (!this.cloudfrontConfig) return;
+    if (!this.s3Config || !this.s3Config.cloudfront) return;
     const sanitizedKey = encodeURI(`/${key}`);
     if (this.queue.some(item => item === sanitizedKey)) return;
     this.queue.push(sanitizedKey);
@@ -60,7 +63,7 @@ export class CloudFrontBatchInvalidator {
     const cloudFront = this.getCloudFront();
     try {
       await cloudFront.send(new CreateInvalidationCommand({
-        DistributionId: this.cloudfrontConfig!.distributionId,
+        DistributionId: this.s3Config!.cloudfront!.distributionId,
         InvalidationBatch: {
           CallerReference: randomUUID(),
           Paths: {
@@ -83,15 +86,16 @@ export class CloudFrontBatchInvalidator {
 
   private getCloudFront(): CloudFrontClient {
     const options: ConstructorParameters<typeof CloudFrontClient>[0] = {};
-    if (config.s3.init) {
-      if (config.s3.init.endpoint) {
-        options.endpoint = config.s3.init.endpoint;
+    const init = this.s3Config ? this.s3Config.init : undefined;
+    if (init) {
+      if (init.endpoint) {
+        options.endpoint = init.endpoint;
       }
-      if (config.s3.init.credentials) {
-        options.credentials = config.s3.init.credentials;
+      if (init.credentials) {
+        options.credentials = init.credentials;
       }
-      if (config.s3.init.region) {
-        options.region = config.s3.init.region;
+      if (init.region) {
+        options.region = init.region;
       }
     }
     return new CloudFrontClient(options);

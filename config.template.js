@@ -42,7 +42,31 @@ module.exports = {
     //   s3ForcePathStyle: true // Always use path style URLs
     // }
 
+    // Example init for an S3-compatible service such as Cloudflare R2.
+    // cloudfront MUST be null when using an R2 endpoint (R2 has no
+    // invalidation API), and publicBaseUrl should be set so the R2 API
+    // endpoint is never emitted into client-facing metadata.
+    // init: {
+    //   endpoint: 'https://<account-id>.r2.cloudflarestorage.com',
+    //   s3ForcePathStyle: true,
+    //   region: 'auto',
+    //   credentials: {
+    //     accessKeyId: '',
+    //     secretAccessKey: '',
+    //   },
+    //   requestChecksumCalculation: 'WHEN_REQUIRED', // R2 rejects the flexible checksums the AWS SDK sends by default
+    //   responseChecksumValidation: 'WHEN_REQUIRED',
+    // }
+
     bucketName: '', // The name for your S3 Bucket
+
+    // publicBaseUrl: '', // Public download URL for clients; takes precedence over cloudfront.publicUrl and init.endpoint
+
+    // Mirror every write to a second S3-compatible store while serving all
+    // reads from this one (useful while migrating between storage backends).
+    // Takes the same shape as this whole s3 object (init, bucketName,
+    // cloudfront, publicBaseUrl).
+    // mirror: { ... },
 
     cloudfront: { // If you don't have CloudFront set up and just want to use the S3 bucket set this to "null"
       distributionId: '', // The CloudFront distribution ID, used for invalidating files

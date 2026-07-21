@@ -1,5 +1,63 @@
 const { fromContainerMetadata } = require("@aws-sdk/credential-providers");
 
+// File store selection for the S3 -> Cloudflare R2 migration, gated on env:
+//
+//   (no R2 vars)                          -> AWS S3 only, identical to before
+//                                            R2 support existed
+//   S3_ENDPOINT                           -> R2 only (post-migration end state)
+//   S3_ENDPOINT + R2_DUAL_WRITE=true      -> dual write, S3 primary / R2 mirror
+//                                            (pre-cutover: CloudFront serves S3)
+//   ... + R2_PRIMARY=true                 -> dual write, R2 primary / S3 mirror
+//                                            (post-cutover bake: Cloudflare
+//                                            serves R2, S3 stays rollback-fresh)
+//
+// All reads and public URLs come from the primary; every write lands in both.
+const useR2 = !!process.env.S3_ENDPOINT;
+const r2DualWrite = useR2 && process.env.R2_DUAL_WRITE === "true";
+const r2Primary = process.env.R2_PRIMARY === "true";
+
+const awsS3Options = () => ({
+  init: {
+    credentials: fromContainerMetadata(),
+    region: "us-east-2",
+  },
+
+  bucketName: process.env.S3_BUCKET_DOWNLOADS_BUCKET,
+
+  cloudfront: {
+    distributionId: process.env.CLOUDFRONT_DISTRIBUTION_ID,
+    publicUrl: process.env.CLOUDFRONT_S3_URL_PREFIX,
+  },
+
+  // https://download.ro.am in prod; used in client-facing metadata (yum
+  // .repo baseurls, RELEASES/RELEASES.json download URLs) so the storage
+  // API endpoint never leaks to clients
+  publicBaseUrl: process.env.CLOUDFRONT_S3_URL_PREFIX,
+});
+
+const r2S3Options = () => ({
+  init: {
+    endpoint: process.env.S3_ENDPOINT,
+    s3ForcePathStyle: true,
+    region: "auto",
+    credentials: {
+      accessKeyId: process.env.R2_ACCESS_KEY_ID,
+      secretAccessKey: process.env.R2_SECRET_ACCESS_KEY,
+    },
+    // R2 rejects the flexible checksums the AWS SDK sends by default
+    requestChecksumCalculation: "WHEN_REQUIRED",
+    responseChecksumValidation: "WHEN_REQUIRED",
+  },
+
+  bucketName: process.env.R2_BUCKET ?? process.env.S3_BUCKET_DOWNLOADS_BUCKET,
+
+  // cloudfront must be null when using an R2 endpoint: R2 has no
+  // invalidation API
+  cloudfront: null,
+
+  publicBaseUrl: process.env.CLOUDFRONT_S3_URL_PREFIX,
+});
+
 module.exports = {
   /**
    * The port to run Nucleus Server on, if the port is in use the server will not start
@@ -57,23 +115,13 @@ module.exports = {
    *
    * Bucket / Region / CloudFront config goes here though
    */
-  s3: {
-    // init: {
-    //   endpoint: "https://roam-nucleus-test.s3.us-east-2.amazonaws.com", // The alternate endpoint to reach the S3 instance at,
-    //   s3ForcePathStyle: true, // Always use path style URLs
-    // },
-    init: {
-      credentials: fromContainerMetadata(),
-      region: 'us-east-2',
-    },
-
-    bucketName: process.env.S3_BUCKET_DOWNLOADS_BUCKET,
-
-    cloudfront: {
-      distributionId: process.env.CLOUDFRONT_DISTRIBUTION_ID,
-      publicUrl: process.env.CLOUDFRONT_S3_URL_PREFIX,
-    },
-  },
+  s3: !useR2
+    ? awsS3Options()
+    : !r2DualWrite
+      ? r2S3Options()
+      : r2Primary
+        ? { ...r2S3Options(), mirror: awsS3Options() }
+        : { ...awsS3Options(), mirror: r2S3Options() },
 
   /**
    * The authentication strategy to use when logging users in.  Current possible values are "local",

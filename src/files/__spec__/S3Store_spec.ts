@@ -6,9 +6,10 @@ import {
   HeadObjectCommand,
   PutObjectCommand,
   GetObjectCommand,
-  ListObjectsCommand,
+  ListObjectsV2Command,
   DeleteObjectsCommand,
 } from '@aws-sdk/client-s3';
+import { CloudFrontClient } from '@aws-sdk/client-cloudfront';
 import { sdkStreamMixin } from '@smithy/util-stream';
 import { Readable } from 'stream';
 
@@ -18,6 +19,7 @@ describe('S3Store', () => {
   let store: S3Store;
   let s3Config: S3Options;
   const s3Mock = mockClient(S3Client);
+  const cfMock = mockClient(CloudFrontClient);
 
   beforeEach(() => {
     s3Config = {
@@ -26,10 +28,12 @@ describe('S3Store', () => {
     };
     store = new S3Store(s3Config);
     s3Mock.reset();
+    cfMock.reset();
   });
 
   afterEach(() => {
     s3Mock.reset();
+    cfMock.reset();
   });
 
   describe('getPublicBaseUrl', () => {
@@ -52,6 +56,25 @@ describe('S3Store', () => {
       };
       const storeWithEndpoint = new S3Store(s3Config);
       assert.strictEqual(await storeWithEndpoint.getPublicBaseUrl(), 'https://custom-s3-endpoint.example.com');
+    });
+
+    it('should prefer publicBaseUrl over the cloudfront static URL', async () => {
+      s3Config.publicBaseUrl = 'https://download.example.com';
+      s3Config.cloudfront = {
+        distributionId: '0',
+        publicUrl: 'https://this.is.custom/lel',
+      };
+      const storeWithPublicBaseUrl = new S3Store(s3Config);
+      assert.strictEqual(await storeWithPublicBaseUrl.getPublicBaseUrl(), 'https://download.example.com');
+    });
+
+    it('should prefer publicBaseUrl over the custom endpoint when cloudfront is null', async () => {
+      s3Config.publicBaseUrl = 'https://download.example.com';
+      s3Config.init = {
+        endpoint: 'https://account-id.r2.cloudflarestorage.com',
+      };
+      const storeWithPublicBaseUrl = new S3Store(s3Config);
+      assert.strictEqual(await storeWithPublicBaseUrl.getPublicBaseUrl(), 'https://download.example.com');
     });
   });
 
@@ -111,6 +134,15 @@ describe('S3Store', () => {
       const calls = s3Mock.commandCalls(PutObjectCommand);
       assert.strictEqual(calls.length, 1);
     });
+
+    it('should not send any cloudfront invalidation when cloudfront is null', async () => {
+      s3Mock.on(HeadObjectCommand).resolves({});
+      s3Mock.on(PutObjectCommand).resolves({});
+
+      assert.strictEqual(await store.putFile('myKey', Buffer.from('value'), true), true);
+
+      assert.strictEqual(cfMock.calls().length, 0);
+    });
   });
 
   describe('getFile', () => {
@@ -134,7 +166,7 @@ describe('S3Store', () => {
 
   describe('listFiles', () => {
     it('should return keys from the bucket', async () => {
-      s3Mock.on(ListObjectsCommand).resolves({
+      s3Mock.on(ListObjectsV2Command).resolves({
         Contents: [
           { Key: 'file1.txt' },
           { Key: 'file2.txt' },
@@ -147,15 +179,34 @@ describe('S3Store', () => {
     });
 
     it('should return empty array when no files', async () => {
-      s3Mock.on(ListObjectsCommand).resolves({ Contents: [] });
+      s3Mock.on(ListObjectsV2Command).resolves({ Contents: [] });
       const files = await store.listFiles('prefix');
       assert.deepStrictEqual(files, []);
+    });
+
+    it('should paginate across multiple pages of results', async () => {
+      s3Mock.on(ListObjectsV2Command)
+        .resolvesOnce({
+          Contents: [{ Key: 'file1.txt' }, { Key: 'file2.txt' }],
+          IsTruncated: true,
+          NextContinuationToken: 'next-token',
+        })
+        .resolvesOnce({
+          Contents: [{ Key: 'file3.txt' }],
+        });
+
+      const files = await store.listFiles('prefix');
+      assert.deepStrictEqual(files, ['file1.txt', 'file2.txt', 'file3.txt']);
+
+      const calls = s3Mock.commandCalls(ListObjectsV2Command);
+      assert.strictEqual(calls.length, 2);
+      assert.strictEqual(calls[1].args[0].input.ContinuationToken, 'next-token');
     });
   });
 
   describe('deletePath', () => {
     it('should delete all files under the path', async () => {
-      s3Mock.on(ListObjectsCommand).resolves({
+      s3Mock.on(ListObjectsV2Command).resolves({
         Contents: [
           { Key: 'prefix/file1.txt' },
           { Key: 'prefix/file2.txt' },
@@ -174,12 +225,27 @@ describe('S3Store', () => {
     });
 
     it('should not call deleteObjects when no files to delete', async () => {
-      s3Mock.on(ListObjectsCommand).resolves({ Contents: [] });
+      s3Mock.on(ListObjectsV2Command).resolves({ Contents: [] });
 
       await store.deletePath('prefix');
 
       const calls = s3Mock.commandCalls(DeleteObjectsCommand);
       assert.strictEqual(calls.length, 0);
+    });
+
+    it('should chunk deletes into batches of at most 1000 keys', async () => {
+      const keys = Array.from({ length: 1500 }, (_, i) => ({ Key: `prefix/file${i}.txt` }));
+      s3Mock.on(ListObjectsV2Command).resolves({ Contents: keys });
+      s3Mock.on(DeleteObjectsCommand).resolves({});
+
+      await store.deletePath('prefix');
+
+      const calls = s3Mock.commandCalls(DeleteObjectsCommand);
+      assert.strictEqual(calls.length, 2);
+      assert.strictEqual(calls[0].args[0].input.Delete?.Objects?.length, 1000);
+      assert.strictEqual(calls[1].args[0].input.Delete?.Objects?.length, 500);
+      const deletedKeys = calls.flatMap(call => (call.args[0].input.Delete?.Objects || []).map(o => o.Key));
+      assert.deepStrictEqual(deletedKeys, keys.map(k => k.Key));
     });
   });
 });

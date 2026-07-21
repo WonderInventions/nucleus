@@ -3,8 +3,8 @@ import {
   HeadObjectCommand,
   PutObjectCommand,
   GetObjectCommand,
-  ListObjectsCommand,
   DeleteObjectsCommand,
+  paginateListObjectsV2,
 } from '@aws-sdk/client-s3';
 
 import debug from 'debug';
@@ -13,6 +13,9 @@ import { CloudFrontBatchInvalidator } from './CloudFrontBatchInvalidator';
 import * as config from '../../config';
 
 const d = debug('nucleus:s3');
+
+// S3 and R2 both reject DeleteObjects requests with more than 1000 keys
+const MAX_DELETE_BATCH = 1000;
 
 export default class S3Store implements IFileStore {
   private s3Client: S3Client | null = null;
@@ -38,6 +41,12 @@ export default class S3Store implements IFileStore {
       }
       if (this.s3Config.init.region) {
         options.region = this.s3Config.init.region;
+      }
+      if (this.s3Config.init.requestChecksumCalculation) {
+        options.requestChecksumCalculation = this.s3Config.init.requestChecksumCalculation;
+      }
+      if (this.s3Config.init.responseChecksumValidation) {
+        options.responseChecksumValidation = this.s3Config.init.responseChecksumValidation;
       }
     }
 
@@ -120,18 +129,22 @@ export default class S3Store implements IFileStore {
     const s3 = this.getS3();
     const keys = await this.listFiles(key);
     d(`Found objects to delete: [${keys.join(', ')}]`);
-    if (keys.length > 0) {
+    for (let i = 0; i < keys.length; i += MAX_DELETE_BATCH) {
       await s3.send(new DeleteObjectsCommand({
         Bucket: this.s3Config.bucketName,
         Delete: {
-          Objects: keys.map(k => ({ Key: k })),
+          Objects: keys.slice(i, i + MAX_DELETE_BATCH).map(k => ({ Key: k })),
         },
       }));
     }
   }
 
   public async getPublicBaseUrl() {
-    const { cloudfront, init } = this.s3Config;
+    const { publicBaseUrl, cloudfront, init } = this.s3Config;
+
+    if (publicBaseUrl) {
+      return publicBaseUrl;
+    }
 
     if (cloudfront) {
       return cloudfront.publicUrl;
@@ -147,11 +160,18 @@ export default class S3Store implements IFileStore {
   public async listFiles(prefix: string) {
     d(`Listing files under path: '${prefix}'`);
     const s3 = this.getS3();
-    const response = await s3.send(new ListObjectsCommand({
+    const keys: string[] = [];
+    const paginator = paginateListObjectsV2({ client: s3 }, {
       Bucket: this.s3Config.bucketName,
       Prefix: prefix,
-    }));
-    const objects = response.Contents || [];
-    return objects.map(object => object.Key).filter((key): key is string => !!key);
+    });
+    for await (const page of paginator) {
+      for (const object of page.Contents || []) {
+        if (object.Key) {
+          keys.push(object.Key);
+        }
+      }
+    }
+    return keys;
   }
 }
