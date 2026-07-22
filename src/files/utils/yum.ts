@@ -113,8 +113,8 @@ export const regenerateYumMetadata = async (store: IFileStore, app: NucleusApp, 
 
     for (const version of channel.versions) {
       if (!version.dead) {
-        const versionFile = (version.files || []).find((f) => f.fileName.endsWith(".rpm") && f.platform === "linux");
-        if (versionFile) {
+        // A version can carry one rpm per arch, keep every one of them advertised
+        for (const versionFile of (version.files || []).filter((f) => f.fileName.endsWith(".rpm") && f.platform === "linux")) {
           const packageKey = getYumPackageKey(app, channel, version.name, versionFile.fileName);
           if (await store.getFileSize(packageKey)) {
             await fs.writeFile(`${tmpDir}/${version.name}-${versionFile.fileName}`, await store.getFile(packageKey));

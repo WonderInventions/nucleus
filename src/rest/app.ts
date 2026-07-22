@@ -356,7 +356,11 @@ router.post('/:id/channel/:channelId/released_versions/delete_old', requireLogin
   const positioner = new Positioner(store);
   try {
     if (!(await positioner.withLock(req.targetApp, async (lock) => {
-      const versionsToDelete = await driver.getOldDeadVersions(req.targetApp, channel, keepCount);
+      // Re-fetch the channel inside the lock: a release may have completed
+      // between the route-level read and lock acquisition, and the linux
+      // repo regeneration during cleanup must advertise it
+      const lockedChannel = (await driver.getChannel(req.targetApp, param(req.params.channelId)))!;
+      const versionsToDelete = await driver.getOldDeadVersions(req.targetApp, lockedChannel, keepCount);
       if (versionsToDelete.length === 0) return;
 
       console.log(JSON.stringify({
@@ -368,10 +372,10 @@ router.post('/:id/channel/:channelId/released_versions/delete_old', requireLogin
       // Stored files are deleted before the database rows: a failure here
       // leaves the rows in place so the operation can safely be retried,
       // whereas the reverse order permanently orphans the stored files
-      if (!await positioner.cleanUpDeletedVersionFiles(lock, req.targetApp, channel, versionsToDelete)) {
+      if (!await positioner.cleanUpDeletedVersionFiles(lock, req.targetApp, lockedChannel, versionsToDelete)) {
         throw new Error('Could not delete stored files, the app lock is no longer valid');
       }
-      await driver.deleteVersions(req.targetApp, channel, versionsToDelete);
+      await driver.deleteVersions(req.targetApp, lockedChannel, versionsToDelete);
       deletedCount = versionsToDelete.length;
 
       console.log(JSON.stringify({

@@ -24,7 +24,7 @@ describe('DualWriteStore', () => {
   beforeEach(() => {
     primary = makeFakeStore();
     secondary = makeFakeStore();
-    store = new DualWriteStore(primary, secondary);
+    store = new DualWriteStore(primary, secondary, { mirrorRetryDelayMs: 1 });
   });
 
   describe('putFile', () => {
@@ -36,8 +36,32 @@ describe('DualWriteStore', () => {
       assert.ok(secondary.putFile.calledOnceWith('myKey', data, true));
     });
 
-    it('should not touch the secondary when the primary skipped the write', async () => {
+    it('should not write the secondary when the primary skipped and the secondary already has the key', async () => {
       primary.putFile.resolves(false);
+      secondary.hasFile.resolves(true);
+
+      assert.strictEqual(await store.putFile('myKey', Buffer.from('value')), false);
+
+      assert.strictEqual(secondary.putFile.callCount, 0);
+    });
+
+    it('should heal the secondary with the primary content when the primary skipped and the secondary is missing the key', async () => {
+      primary.putFile.resolves(false);
+      secondary.hasFile.resolves(false);
+      primary.getFile.resolves(Buffer.from('authoritative-content'));
+
+      assert.strictEqual(await store.putFile('myKey', Buffer.from('new-upload-content')), false);
+
+      assert.strictEqual(secondary.putFile.callCount, 1);
+      assert.strictEqual(secondary.putFile.firstCall.args[0], 'myKey');
+      assert.strictEqual(secondary.putFile.firstCall.args[1].toString(), 'authoritative-content');
+      assert.strictEqual(secondary.putFile.firstCall.args[2], true);
+    });
+
+    it('should not heal the secondary when the primary content cannot be read', async () => {
+      primary.putFile.resolves(false);
+      secondary.hasFile.resolves(false);
+      primary.getFile.resolves(Buffer.from(''));
 
       assert.strictEqual(await store.putFile('myKey', Buffer.from('value')), false);
 
@@ -51,10 +75,21 @@ describe('DualWriteStore', () => {
       assert.strictEqual(secondary.putFile.callCount, 0);
     });
 
-    it('should propagate secondary write failures', async () => {
+    it('should retry a failed mirror write and succeed', async () => {
+      secondary.putFile.onFirstCall().rejects(new Error('secondary blip'));
+      secondary.putFile.onSecondCall().resolves(true);
+
+      assert.strictEqual(await store.putFile('myKey', Buffer.from('value'), true), true);
+
+      assert.strictEqual(secondary.putFile.callCount, 2);
+    });
+
+    it('should not fail the write when the secondary keeps failing', async () => {
       secondary.putFile.rejects(new Error('secondary down'));
 
-      await assert.rejects(store.putFile('myKey', Buffer.from('value'), true), /secondary down/);
+      assert.strictEqual(await store.putFile('myKey', Buffer.from('value'), true), true);
+
+      assert.strictEqual(secondary.putFile.callCount, 3);
     });
   });
 
