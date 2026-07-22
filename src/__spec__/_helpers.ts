@@ -217,6 +217,14 @@ export const store = {
   async getFile(filePath: string): Promise<Buffer> {
     return fs.readFile(path.join(filesRoot, filePath));
   },
+  async putFile(filePath: string, data: Buffer): Promise<void> {
+    const target = path.join(filesRoot, filePath);
+    await fs.mkdir(path.dirname(target), { recursive: true });
+    await fs.writeFile(target, data);
+  },
+  async deletePath(filePath: string): Promise<void> {
+    await fs.rm(path.join(filesRoot, filePath), { recursive: true, force: true });
+  },
 };
 
 export const createApp = async (): Promise<NucleusApp> => {

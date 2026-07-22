@@ -9,14 +9,26 @@ interface S3Options {
     s3ForcePathStyle?: boolean;
     credentials?: import('@aws-sdk/types').AwsCredentialIdentity | import('@aws-sdk/types').AwsCredentialIdentityProvider;
     region?: string;
+    requestChecksumCalculation?: 'WHEN_SUPPORTED' | 'WHEN_REQUIRED';
+    responseChecksumValidation?: 'WHEN_SUPPORTED' | 'WHEN_REQUIRED';
   }
 
   bucketName: string;
+
+  // Public URL clients should use to download files; takes precedence over
+  // cloudfront.publicUrl and init.endpoint so the storage API endpoint is
+  // never emitted into client-facing metadata
+  publicBaseUrl?: string;
 
   cloudfront: {
     distributionId: string;
     publicUrl: string;
   } | null
+
+  // When set, every write is mirrored to a second S3-compatible store while
+  // all reads are served from this store.  Used to keep two backends in sync
+  // during a storage migration
+  mirror?: S3Options;
 }
 
 interface LocalOptions {

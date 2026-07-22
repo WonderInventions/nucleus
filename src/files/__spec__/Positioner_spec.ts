@@ -715,6 +715,84 @@ describe('Positioner', () => {
     });
   });
 
+  describe('cleanUpDeletedVersionFiles', () => {
+    const deletedVersion: NucleusVersion = {
+      name: '0.0.2',
+      dead: true,
+      rollout: 100,
+      files: [
+        { ...generateSHAs(Buffer.from('')), fileName: 'thing.exe', arch: 'x64', platform: 'win32', type: 'installer' },
+        { ...generateSHAs(Buffer.from('')), fileName: 'thing.dmg', arch: 'arm64', platform: 'darwin', type: 'installer' },
+        { ...generateSHAs(Buffer.from('')), fileName: 'thing.deb', arch: 'x64', platform: 'linux', type: 'installer' },
+        { ...generateSHAs(Buffer.from('')), fileName: 'thing.rpm', arch: 'x64', platform: 'linux', type: 'installer' },
+      ],
+    };
+
+    let regenerateAptRepo: SinonStub;
+    let regenerateYumRepo: SinonStub;
+
+    beforeEach(() => {
+      regenerateAptRepo = promiseStub();
+      regenerateYumRepo = promiseStub();
+      positioner.regenerateAptRepo = regenerateAptRepo;
+      positioner.regenerateYumRepo = regenerateYumRepo;
+    });
+
+    it('should regenerate the linux repo metadata when linux packages were deleted', async () => {
+      await positioner.cleanUpDeletedVersionFiles(lock, fakeApp, fakeChannel, [deletedVersion]);
+      assert.strictEqual(regenerateAptRepo.callCount, 1);
+      assert.strictEqual(regenerateYumRepo.callCount, 1);
+      assert.ok(regenerateAptRepo.calledWith(fakeApp, fakeChannel));
+      assert.ok(regenerateYumRepo.calledWith(fakeApp, fakeChannel));
+    });
+
+    it('should not regenerate the linux repo metadata when no linux packages were deleted', async () => {
+      const darwinOnlyVersion: NucleusVersion = {
+        name: '0.0.2',
+        dead: true,
+        rollout: 100,
+        files: [
+          { ...generateSHAs(Buffer.from('')), fileName: 'thing.dmg', arch: 'arm64', platform: 'darwin', type: 'installer' },
+        ],
+      };
+      await positioner.cleanUpDeletedVersionFiles(lock, fakeApp, fakeChannel, [darwinOnlyVersion]);
+      assert.strictEqual(regenerateAptRepo.callCount, 0);
+      assert.strictEqual(regenerateYumRepo.callCount, 0);
+    });
+
+    it('should delete the _index tree for each deleted version', async () => {
+      await positioner.cleanUpDeletedVersionFiles(lock, fakeApp, fakeChannel, [deletedVersion]);
+      assert.ok(fakeStore.deletePath.calledWith('fake_slug/fake_channel_id/_index/0.0.2'));
+    });
+
+    it('should delete win32 and darwin platform artifacts', async () => {
+      await positioner.cleanUpDeletedVersionFiles(lock, fakeApp, fakeChannel, [deletedVersion]);
+      assert.ok(fakeStore.deletePath.calledWith('fake_slug/fake_channel_id/win32/x64/thing.exe'));
+      assert.ok(fakeStore.deletePath.calledWith('fake_slug/fake_channel_id/darwin/arm64/thing.dmg'));
+    });
+
+    it('should delete linux apt and yum package files', async () => {
+      await positioner.cleanUpDeletedVersionFiles(lock, fakeApp, fakeChannel, [deletedVersion]);
+      assert.ok(fakeStore.deletePath.calledWith('fake_slug/fake_channel_id/linux/debian/binary/0.0.2-thing.deb'));
+      assert.ok(fakeStore.deletePath.calledWith('fake_slug/fake_channel_id/linux/redhat/0.0.2-thing.rpm'));
+    });
+
+    it('should delete exactly one path per file plus the _index tree', async () => {
+      await positioner.cleanUpDeletedVersionFiles(lock, fakeApp, fakeChannel, [deletedVersion]);
+      assert.strictEqual(fakeStore.deletePath.callCount, 5);
+    });
+
+    it('should delete nothing without a valid lock', async () => {
+      assert.strictEqual(
+        await positioner.cleanUpDeletedVersionFiles('not-the-lock', fakeApp, fakeChannel, [deletedVersion]),
+        false,
+      );
+      assert.strictEqual(fakeStore.deletePath.callCount, 0);
+      assert.strictEqual(regenerateAptRepo.callCount, 0);
+      assert.strictEqual(regenerateYumRepo.callCount, 0);
+    });
+  });
+
   describe('locking', () => {
     beforeEach(() => {
       const files: {

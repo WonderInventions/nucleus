@@ -94,6 +94,45 @@ const writeAptMetadata = async (tmpDir: string, app: NucleusApp) => {
   await generateReleaseFile(path.resolve(tmpDir, 'binary'), app);
 };
 
+export const getAptPackageKey = (app: NucleusApp, channel: NucleusChannel, versionName: string, fileName: string) =>
+  path.posix.join(app.slug, channel.id!, 'linux', 'debian', 'binary', `${versionName}-${fileName}`);
+
+/**
+ * Rebuild the apt repo metadata from the packages that should currently be
+ * advertised (the latest non-dead version's debs, mirroring addFileToAptRepo)
+ * without adding anything.  Used after deleting packages so the metadata never
+ * advertises files that no longer exist.
+ */
+export const regenerateAptMetadata = async (store: IFileStore, app: NucleusApp, channel: NucleusChannel) => {
+  await withTmpDir(async (tmpDir) => {
+    const storeKey = path.posix.join(app.slug, channel.id!, 'linux', 'debian');
+    await fs.mkdir(path.resolve(tmpDir, 'binary'), { recursive: true });
+
+    let latestVersion: NucleusVersion | undefined;
+    let latestVersionFiles: NucleusFile[] = [];
+    for (const version of channel.versions) {
+      if (!version.dead && (!latestVersion || semver.gt(version.name, latestVersion.name))) {
+        const versionFiles = (version.files || []).filter((f) => f.fileName.endsWith(".deb") && f.platform === "linux");
+        if (versionFiles.length) {
+          latestVersion = version;
+          latestVersionFiles = versionFiles;
+        }
+      }
+    }
+    if (latestVersion) {
+      for (const file of latestVersionFiles) {
+        const packageKey = getAptPackageKey(app, channel, latestVersion.name, file.fileName);
+        if (await store.getFileSize(packageKey)) {
+          await fs.writeFile(`${tmpDir}/binary/${latestVersion.name}-${file.fileName}`, await store.getFile(packageKey));
+        }
+      }
+    }
+
+    await writeAptMetadata(tmpDir, app);
+    await syncDirectoryToStore(store, storeKey, tmpDir);
+  });
+};
+
 export const initializeAptRepo = async (store: IFileStore, app: NucleusApp, channel: NucleusChannel) => {
   await withTmpDir(async (tmpDir) => {
     await fs.mkdir(path.resolve(tmpDir, 'binary'), { recursive: true });
@@ -134,7 +173,7 @@ export const addFileToAptRepo = async (store: IFileStore, {
       for (const otherFile of latestVersionFiles) {
         if (otherFile.fileName !== file.fileName || internalVersion.name !== latestVersion.name) {
           const fname = `${latestVersion.name}-${otherFile.fileName}`;
-          await fs.writeFile(`${tmpDir}/binary/${fname}`, await store.getFile(`${storeKey}/binary/${fname}`));
+          await fs.writeFile(`${tmpDir}/binary/${fname}`, await store.getFile(getAptPackageKey(app, channel, latestVersion.name, otherFile.fileName)));
         }
       }
     }

@@ -4,8 +4,8 @@ import debug from 'debug';
 import * as path from 'path';
 import * as semver from 'semver';
 
-import { initializeAptRepo, addFileToAptRepo } from './utils/apt';
-import { initializeYumRepo, addFileToYumRepo } from './utils/yum';
+import { initializeAptRepo, addFileToAptRepo, getAptPackageKey, regenerateAptMetadata } from './utils/apt';
+import { initializeYumRepo, addFileToYumRepo, getYumPackageKey, regenerateYumMetadata } from './utils/yum';
 import { updateDarwinReleasesFiles } from './utils/darwin';
 import { updateWin32ReleasesFiles } from './utils/win32';
 
@@ -58,6 +58,91 @@ export default class Positioner {
     if (lock !== await this.currentLock(app)) return;
     d(`Deleting all temporary files for app: ${app.slug} in save ID: ${saveString}`);
     await this.store.deletePath(path.join(app.slug, 'temp', saveString));
+  }
+
+  /**
+   * Delete every stored file for versions that have been deleted from the database:
+   * the _index tree, win32/darwin artifacts and the linux apt/yum package files.
+   *
+   * The apt/yum repo metadata is not touched here: it is regenerated from only
+   * non-dead versions on every linux upload, and only dead versions can be
+   * deleted, so the metadata no longer references these package files.
+   */
+  public async cleanUpDeletedVersionFiles(lock: PositionerLock, app: NucleusApp, channel: NucleusChannel, versions: NucleusVersion[]): Promise<boolean> {
+    if (lock !== await this.currentLock(app)) {
+      console.warn(JSON.stringify({
+        message: 'Skipped deleting stored files for deleted versions, the given lock is not current',
+        app: app.slug,
+        channel: channel.id,
+        versions: versions.map(v => v.name),
+      }));
+      return false;
+    }
+    let deletedDeb = false;
+    let deletedRpm = false;
+    for (const version of versions) {
+      const paths = [path.posix.join(app.slug, channel.id!, '_index', version.name)];
+
+      for (const file of version.files || []) {
+        switch (file.platform) {
+          case 'win32':
+          case 'darwin':
+            paths.push(path.posix.join(app.slug, channel.id!, file.platform, file.arch, file.fileName));
+            break;
+          case 'linux':
+            if (file.fileName.endsWith('.deb')) {
+              paths.push(getAptPackageKey(app, channel, version.name, file.fileName));
+              deletedDeb = true;
+            } else if (file.fileName.endsWith('.rpm')) {
+              paths.push(getYumPackageKey(app, channel, version.name, file.fileName));
+              deletedRpm = true;
+            }
+            break;
+          default:
+            break;
+        }
+      }
+
+      console.log(JSON.stringify({
+        message: 'Deleting stored files for deleted version',
+        app: app.slug,
+        channel: channel.id,
+        version: version.name,
+        paths,
+      }));
+      for (const deletePath of paths) {
+        await this.store.deletePath(deletePath);
+      }
+    }
+
+    // The repo metadata may still advertise a deleted package (e.g. when no
+    // linux upload has happened since the version died), so rebuild it from
+    // the surviving non-dead versions to prevent apt/dnf clients resolving
+    // package entries that would now 404
+    if (deletedDeb || deletedRpm) {
+      console.log(JSON.stringify({
+        message: 'Regenerating linux repo metadata after deleting packages',
+        app: app.slug,
+        channel: channel.id,
+        apt: deletedDeb,
+        yum: deletedRpm,
+      }));
+      if (deletedDeb) {
+        await this.regenerateAptRepo(app, channel);
+      }
+      if (deletedRpm) {
+        await this.regenerateYumRepo(app, channel);
+      }
+    }
+    return true;
+  }
+
+  public regenerateAptRepo = async (app: NucleusApp, channel: NucleusChannel) => {
+    await regenerateAptMetadata(this.store, app, channel);
+  }
+
+  public regenerateYumRepo = async (app: NucleusApp, channel: NucleusChannel) => {
+    await regenerateYumMetadata(this.store, app, channel);
   }
 
   /**

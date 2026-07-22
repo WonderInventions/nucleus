@@ -411,7 +411,7 @@ export default class SequelizeDriver extends BaseDriver {
         );`);
   };
 
-  public async deleteOldDeadVersions(app: NucleusApp, channel: NucleusChannel, keepCount: number): Promise<NucleusVersion[]> {
+  public async getOldDeadVersions(app: NucleusApp, channel: NucleusChannel, keepCount: number): Promise<NucleusVersion[]> {
     await this.ensureConnected();
     const rawChannel = await Channel.findOne<Channel>({
       where: {
@@ -430,14 +430,27 @@ export default class SequelizeDriver extends BaseDriver {
 
     // Skip the first keepCount versions, then collect dead ones from the rest
     const candidates = sorted.slice(keepCount);
-    const toDelete = candidates.filter(v => v.dead);
+    return candidates.filter(v => v.dead).map(v => this.fixVersionStruct(v));
+  }
 
-    if (toDelete.length === 0) return [];
+  public async deleteVersions(app: NucleusApp, channel: NucleusChannel, versions: NucleusVersion[]): Promise<void> {
+    await this.ensureConnected();
+    if (versions.length === 0) return;
+    const rawChannel = await Channel.findOne<Channel>({
+      where: {
+        appId: parseInt(app.id!, 10),
+        stringId: channel.id,
+      },
+      include: [{
+        model: Version,
+        include: [File],
+      }],
+    });
+    if (!rawChannel || !rawChannel.versions) return;
 
-    const deletedVersions: NucleusVersion[] = [];
-    for (const version of toDelete) {
-      // Capture version info before destroying
-      deletedVersions.push(this.fixVersionStruct(version));
+    const namesToDelete = new Set(versions.map(v => v.name));
+    for (const version of rawChannel.versions) {
+      if (!namesToDelete.has(version.name)) continue;
 
       // Destroy associated files, then the version itself
       for (const file of (version.files || [])) {
@@ -447,7 +460,6 @@ export default class SequelizeDriver extends BaseDriver {
     }
 
     await this.writeVersionsFileToStore(app, channel);
-    return deletedVersions;
   }
 
   private fixVersionStruct(version: Version): NucleusVersion {

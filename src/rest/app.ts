@@ -345,34 +345,65 @@ router.post('/:id/channel/:channelId/released_versions/delete_old', requireLogin
     return res.status(400).json({ error: 'keepCount must be a non-negative number' });
   }
 
-  const deletedVersions = await driver.deleteOldDeadVersions(req.targetApp, channel, keepCount);
-  if (deletedVersions.length === 0) {
-    return res.json({ success: true, deleted: 0 });
-  }
+  const logContext = {
+    app: req.targetApp.slug,
+    channel: channel.id,
+    keepCount,
+    user: req.user ? req.user.id : null,
+  };
 
-  d(`User ${req.user ? req.user.id : "none"} deleting ${deletedVersions.length} old dead versions for app: '${req.targetApp.slug}' on channel: ${channel.name}`);
-
+  let deletedCount = 0;
   const positioner = new Positioner(store);
-  if (!(await positioner.withLock(req.targetApp, async (lock) => {
-    for (const version of deletedVersions) {
-      // Delete _index files for this version
-      await store.deletePath(`${req.targetApp.slug}/${channel.id}/_index/${version.name}`);
+  try {
+    if (!(await positioner.withLock(req.targetApp, async (lock) => {
+      // Re-fetch the channel inside the lock: a release may have completed
+      // between the route-level read and lock acquisition, and the linux
+      // repo regeneration during cleanup must advertise it
+      const lockedChannel = (await driver.getChannel(req.targetApp, param(req.params.channelId)))!;
+      const versionsToDelete = await driver.getOldDeadVersions(req.targetApp, lockedChannel, keepCount);
+      if (versionsToDelete.length === 0) return;
 
-      // Delete platform-specific files (win32, darwin) — skip linux repo files
-      for (const file of version.files) {
-        if (file.platform === 'win32' || file.platform === 'darwin') {
-          const platformPath = `${req.targetApp.slug}/${channel.id}/${file.platform}/${file.arch}/${file.fileName}`;
-          await store.deletePath(platformPath);
-        }
+      console.log(JSON.stringify({
+        message: 'Deleting old dead versions',
+        ...logContext,
+        versions: versionsToDelete.map(v => ({ name: v.name, fileCount: (v.files || []).length })),
+      }));
+
+      // Stored files are deleted before the database rows: a failure here
+      // leaves the rows in place so the operation can safely be retried,
+      // whereas the reverse order permanently orphans the stored files
+      if (!await positioner.cleanUpDeletedVersionFiles(lock, req.targetApp, lockedChannel, versionsToDelete)) {
+        throw new Error('Could not delete stored files, the app lock is no longer valid');
       }
+      await driver.deleteVersions(req.targetApp, lockedChannel, versionsToDelete);
+      deletedCount = versionsToDelete.length;
+
+      console.log(JSON.stringify({
+        message: 'Deleted old dead versions',
+        ...logContext,
+        deleted: versionsToDelete.map(v => v.name),
+      }));
+    }))) {
+      console.warn(JSON.stringify({
+        message: 'Skipped deleting old dead versions, could not obtain the app lock',
+        ...logContext,
+      }));
+      return res.status(409).json({ error: 'Operation already in progress' });
     }
-  }))) {
-    return res.status(409).json({ error: 'Operation already in progress' });
+  } catch (err) {
+    console.error(JSON.stringify({
+      message: 'Failed to delete old dead versions, database rows were retained for any version whose files were not fully deleted',
+      ...logContext,
+      err: `${err}`,
+    }));
+    throw err;
   }
 
-  await updateStaticReleaseMetaData(req.targetApp, channel);
+  if (deletedCount > 0) {
+    await updateStaticReleaseMetaData(req.targetApp, channel);
+  }
 
-  res.json({ success: true, deleted: deletedVersions.length });
+  res.json({ success: true, deleted: deletedCount });
 }));
 
 router.post('/:id/channel/:channelId/temporary_releases/:temporarySaveId/delete', requireLogin, noPendingMigrations, a(async (req, res) => {
