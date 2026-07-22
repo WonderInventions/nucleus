@@ -728,6 +728,38 @@ describe('Positioner', () => {
       ],
     };
 
+    let regenerateAptRepo: SinonStub;
+    let regenerateYumRepo: SinonStub;
+
+    beforeEach(() => {
+      regenerateAptRepo = promiseStub();
+      regenerateYumRepo = promiseStub();
+      positioner.regenerateAptRepo = regenerateAptRepo;
+      positioner.regenerateYumRepo = regenerateYumRepo;
+    });
+
+    it('should regenerate the linux repo metadata when linux packages were deleted', async () => {
+      await positioner.cleanUpDeletedVersionFiles(lock, fakeApp, fakeChannel, [deletedVersion]);
+      assert.strictEqual(regenerateAptRepo.callCount, 1);
+      assert.strictEqual(regenerateYumRepo.callCount, 1);
+      assert.ok(regenerateAptRepo.calledWith(fakeApp, fakeChannel));
+      assert.ok(regenerateYumRepo.calledWith(fakeApp, fakeChannel));
+    });
+
+    it('should not regenerate the linux repo metadata when no linux packages were deleted', async () => {
+      const darwinOnlyVersion: NucleusVersion = {
+        name: '0.0.2',
+        dead: true,
+        rollout: 100,
+        files: [
+          { ...generateSHAs(Buffer.from('')), fileName: 'thing.dmg', arch: 'arm64', platform: 'darwin', type: 'installer' },
+        ],
+      };
+      await positioner.cleanUpDeletedVersionFiles(lock, fakeApp, fakeChannel, [darwinOnlyVersion]);
+      assert.strictEqual(regenerateAptRepo.callCount, 0);
+      assert.strictEqual(regenerateYumRepo.callCount, 0);
+    });
+
     it('should delete the _index tree for each deleted version', async () => {
       await positioner.cleanUpDeletedVersionFiles(lock, fakeApp, fakeChannel, [deletedVersion]);
       assert.ok(fakeStore.deletePath.calledWith('fake_slug/fake_channel_id/_index/0.0.2'));
@@ -751,8 +783,13 @@ describe('Positioner', () => {
     });
 
     it('should delete nothing without a valid lock', async () => {
-      await positioner.cleanUpDeletedVersionFiles('not-the-lock', fakeApp, fakeChannel, [deletedVersion]);
+      assert.strictEqual(
+        await positioner.cleanUpDeletedVersionFiles('not-the-lock', fakeApp, fakeChannel, [deletedVersion]),
+        false,
+      );
       assert.strictEqual(fakeStore.deletePath.callCount, 0);
+      assert.strictEqual(regenerateAptRepo.callCount, 0);
+      assert.strictEqual(regenerateYumRepo.callCount, 0);
     });
   });
 

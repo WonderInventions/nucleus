@@ -99,6 +99,40 @@ const signAllRpmFiles = async (dir: string) => {
 export const getYumPackageKey = (app: NucleusApp, channel: NucleusChannel, versionName: string, fileName: string) =>
   path.posix.join(app.slug, channel.id!, 'linux', 'redhat', `${versionName}-${fileName}`);
 
+/**
+ * Rebuild the yum repo metadata from the packages that should currently be
+ * advertised (every non-dead version's rpm, mirroring addFileToYumRepo)
+ * without adding anything.  Used after deleting packages so the metadata never
+ * advertises files that no longer exist.  The rpms pulled from the store are
+ * already signed so no re-signing is needed.
+ */
+export const regenerateYumMetadata = async (store: IFileStore, app: NucleusApp, channel: NucleusChannel) => {
+  await withTmpDir(async (tmpDir) => {
+    const storeKey = path.posix.join(app.slug, channel.id!, 'linux', 'redhat');
+    await fs.mkdir(`${tmpDir}/repodata`, { recursive: true });
+
+    for (const version of channel.versions) {
+      if (!version.dead) {
+        const versionFile = (version.files || []).find((f) => f.fileName.endsWith(".rpm") && f.platform === "linux");
+        if (versionFile) {
+          const packageKey = getYumPackageKey(app, channel, version.name, versionFile.fileName);
+          if (await store.getFileSize(packageKey)) {
+            await fs.writeFile(`${tmpDir}/${version.name}-${versionFile.fileName}`, await store.getFile(packageKey));
+          }
+        }
+      }
+    }
+
+    d(`Regenerating repo metadata`);
+    const [exe, args] = getCreateRepoCommand(tmpDir, ['-v', '--no-database', './']);
+    await cp.spawn(exe, args, {
+      cwd: tmpDir,
+    });
+    await syncDirectoryToStore(store, storeKey, tmpDir);
+    await createRepoFile(store, app, channel);
+  });
+};
+
 export const initializeYumRepo = async (store: IFileStore, app: NucleusApp, channel: NucleusChannel) => {
   await withTmpDir(async (tmpDir) => {
     const [exe, args] = getCreateRepoCommand(tmpDir, ['-v', '--no-database', './']);

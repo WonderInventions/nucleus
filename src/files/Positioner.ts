@@ -4,8 +4,8 @@ import debug from 'debug';
 import * as path from 'path';
 import * as semver from 'semver';
 
-import { initializeAptRepo, addFileToAptRepo, getAptPackageKey } from './utils/apt';
-import { initializeYumRepo, addFileToYumRepo, getYumPackageKey } from './utils/yum';
+import { initializeAptRepo, addFileToAptRepo, getAptPackageKey, regenerateAptMetadata } from './utils/apt';
+import { initializeYumRepo, addFileToYumRepo, getYumPackageKey, regenerateYumMetadata } from './utils/yum';
 import { updateDarwinReleasesFiles } from './utils/darwin';
 import { updateWin32ReleasesFiles } from './utils/win32';
 
@@ -78,6 +78,8 @@ export default class Positioner {
       }));
       return false;
     }
+    let deletedDeb = false;
+    let deletedRpm = false;
     for (const version of versions) {
       const paths = [path.posix.join(app.slug, channel.id!, '_index', version.name)];
 
@@ -90,8 +92,10 @@ export default class Positioner {
           case 'linux':
             if (file.fileName.endsWith('.deb')) {
               paths.push(getAptPackageKey(app, channel, version.name, file.fileName));
+              deletedDeb = true;
             } else if (file.fileName.endsWith('.rpm')) {
               paths.push(getYumPackageKey(app, channel, version.name, file.fileName));
+              deletedRpm = true;
             }
             break;
           default:
@@ -110,7 +114,35 @@ export default class Positioner {
         await this.store.deletePath(deletePath);
       }
     }
+
+    // The repo metadata may still advertise a deleted package (e.g. when no
+    // linux upload has happened since the version died), so rebuild it from
+    // the surviving non-dead versions to prevent apt/dnf clients resolving
+    // package entries that would now 404
+    if (deletedDeb || deletedRpm) {
+      console.log(JSON.stringify({
+        message: 'Regenerating linux repo metadata after deleting packages',
+        app: app.slug,
+        channel: channel.id,
+        apt: deletedDeb,
+        yum: deletedRpm,
+      }));
+      if (deletedDeb) {
+        await this.regenerateAptRepo(app, channel);
+      }
+      if (deletedRpm) {
+        await this.regenerateYumRepo(app, channel);
+      }
+    }
     return true;
+  }
+
+  public regenerateAptRepo = async (app: NucleusApp, channel: NucleusChannel) => {
+    await regenerateAptMetadata(this.store, app, channel);
+  }
+
+  public regenerateYumRepo = async (app: NucleusApp, channel: NucleusChannel) => {
+    await regenerateYumMetadata(this.store, app, channel);
   }
 
   /**
