@@ -1,5 +1,7 @@
 import debug from 'debug';
 
+import { isUrlEmbeddingManifestKey, rewriteManifestBaseUrl } from './utils/manifestUrls';
+
 const d = debug('nucleus:dual-write');
 
 interface DualWriteOptions {
@@ -22,6 +24,14 @@ const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
  * files -- a failing mirror must never wedge a release.  Drift is reconciled
  * by healing (a later put of a key the secondary is missing copies the
  * primary's bytes across) and by bulk re-syncs during the migration.
+ *
+ * Manifests that embed absolute download URLs (win32 RELEASES, darwin
+ * RELEASES.json, yum .repo) are rendered from the primary's public base URL,
+ * so when the secondary is served from a different domain their URLs are
+ * rewritten to the secondary's base URL on the way through -- otherwise
+ * clients hitting the secondary's domain would bounce back to the primary's.
+ * This means bulk re-syncs between the backends must exclude those manifest
+ * keys or they will clobber the rewritten copies.
  *
  * Deletes remain strict: the flows that delete are retryable, so a failed
  * secondary delete propagates rather than leaving the mirror holding
@@ -57,10 +67,21 @@ export default class DualWriteStore implements IFileStore {
     return wrote;
   }
 
+  // Kept inside mirrorWrite's try/retry loop so a throwing getPublicBaseUrl
+  // is treated like any failed mirror write instead of wedging the release
+  private async dataForSecondary(key: string, data: Buffer) {
+    if (!isUrlEmbeddingManifestKey(key)) return data;
+    const [primaryBaseUrl, secondaryBaseUrl] = await Promise.all([
+      this.primary.getPublicBaseUrl(),
+      this.secondary.getPublicBaseUrl(),
+    ]);
+    return rewriteManifestBaseUrl(data, primaryBaseUrl, secondaryBaseUrl);
+  }
+
   private async mirrorWrite(key: string, data: Buffer) {
     for (let attempt = 1; attempt <= this.mirrorWriteAttempts; attempt += 1) {
       try {
-        await this.secondary.putFile(key, data, true);
+        await this.secondary.putFile(key, await this.dataForSecondary(key, data), true);
         return;
       } catch (err) {
         if (attempt < this.mirrorWriteAttempts) {

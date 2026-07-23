@@ -93,6 +93,73 @@ describe('DualWriteStore', () => {
     });
   });
 
+  describe('manifest url rewriting', () => {
+    beforeEach(() => {
+      primary.getPublicBaseUrl.resolves('https://download.example.com');
+      secondary.getPublicBaseUrl.resolves('https://mirror.example.com');
+    });
+
+    it('should rewrite manifest urls to the secondary base url while the primary keeps the original bytes', async () => {
+      const releases = Buffer.from('ABC123 https://download.example.com/app/chan/win32/x64/MyApp-full.nupkg 100');
+
+      await store.putFile('app/chan/win32/x64/RELEASES', releases, true);
+
+      assert.strictEqual(primary.putFile.firstCall.args[1].toString(), releases.toString());
+      assert.strictEqual(
+        secondary.putFile.firstCall.args[1].toString(),
+        'ABC123 https://mirror.example.com/app/chan/win32/x64/MyApp-full.nupkg 100',
+      );
+    });
+
+    it('should rewrite the baseurl in a mirrored .repo file', async () => {
+      await store.putFile('app/chan/linux/app.repo', Buffer.from('baseurl=https://download.example.com/app/chan/linux/redhat'), true);
+
+      assert.strictEqual(
+        secondary.putFile.firstCall.args[1].toString(),
+        'baseurl=https://mirror.example.com/app/chan/linux/redhat',
+      );
+    });
+
+    it('should mirror artifact bytes untouched even when they contain the primary base url', async () => {
+      const artifact = Buffer.from('binary https://download.example.com/app/chan/win32/x64/foo mention');
+
+      await store.putFile('app/chan/win32/x64/MyApp-full.nupkg', artifact, true);
+
+      assert.strictEqual(secondary.putFile.firstCall.args[1].toString(), artifact.toString());
+    });
+
+    it('should mirror manifest bytes untouched when both stores share a base url', async () => {
+      secondary.getPublicBaseUrl.resolves('https://download.example.com');
+      const releases = Buffer.from('ABC123 https://download.example.com/app/chan/win32/x64/MyApp-full.nupkg 100');
+
+      await store.putFile('app/chan/win32/x64/RELEASES', releases, true);
+
+      assert.strictEqual(secondary.putFile.firstCall.args[1].toString(), releases.toString());
+    });
+
+    it('should rewrite healed manifest content', async () => {
+      primary.putFile.resolves(false);
+      secondary.hasFile.resolves(false);
+      primary.getFile.resolves(Buffer.from('{"url":"https://download.example.com/app/chan/darwin/x64/MyApp.zip"}'));
+
+      await store.putFile('app/chan/darwin/x64/RELEASES.json', Buffer.from('new-upload-content'));
+
+      assert.strictEqual(
+        secondary.putFile.firstCall.args[1].toString(),
+        '{"url":"https://mirror.example.com/app/chan/darwin/x64/MyApp.zip"}',
+      );
+    });
+
+    it('should treat a failing getPublicBaseUrl like a failed mirror write and not fail the release', async () => {
+      secondary.getPublicBaseUrl.rejects(new Error('config exploded'));
+
+      assert.strictEqual(await store.putFile('app/chan/win32/x64/RELEASES', Buffer.from('value'), true), true);
+
+      assert.strictEqual(secondary.putFile.callCount, 0);
+      assert.strictEqual(secondary.getPublicBaseUrl.callCount, 3);
+    });
+  });
+
   describe('deletePath', () => {
     it('should delete from both stores', async () => {
       await store.deletePath('some/path');

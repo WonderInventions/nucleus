@@ -65,7 +65,11 @@ module.exports = {
     // Mirror every write to a second S3-compatible store while serving all
     // reads from this one (useful while migrating between storage backends).
     // Takes the same shape as this whole s3 object (init, bucketName,
-    // cloudfront, publicBaseUrl).
+    // cloudfront, publicBaseUrl).  When the mirror's publicBaseUrl differs
+    // from this store's, the download URLs embedded in win32 RELEASES,
+    // darwin RELEASES.json and yum .repo files are rewritten to the mirror's
+    // publicBaseUrl as they are mirrored, so each backend's manifests point
+    // at its own domain.
     // mirror: { ... },
 
     cloudfront: { // If you don't have CloudFront set up and just want to use the S3 bucket set this to "null"

@@ -12,6 +12,12 @@ const { fromContainerMetadata } = require("@aws-sdk/credential-providers");
 //                                            serves R2, S3 stays rollback-fresh)
 //
 // All reads and public URLs come from the primary; every write lands in both.
+//
+// R2_PUBLIC_URL is the public domain serving the R2 bucket
+// (https://download-cf.ro.am in prod).  Manifests written to R2 embed it
+// instead of the CloudFront domain: when R2 is the mirror, DualWriteStore
+// rewrites the mirrored manifest URLs to it; when R2 is primary (or the only
+// store) manifests are rendered with it directly.
 const useR2 = !!process.env.S3_ENDPOINT;
 const r2DualWrite = useR2 && process.env.R2_DUAL_WRITE === "true";
 const r2Primary = process.env.R2_PRIMARY === "true";
@@ -55,7 +61,9 @@ const r2S3Options = () => ({
   // invalidation API
   cloudfront: null,
 
-  publicBaseUrl: process.env.CLOUDFRONT_S3_URL_PREFIX,
+  // Falls back to the CloudFront domain so behavior is unchanged until
+  // R2_PUBLIC_URL is set
+  publicBaseUrl: process.env.R2_PUBLIC_URL || process.env.CLOUDFRONT_S3_URL_PREFIX,
 });
 
 module.exports = {
