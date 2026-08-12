@@ -207,6 +207,27 @@ describe('Positioner', () => {
           assert.strictEqual(fakeStore.putFile.getCall(3).args[0], 'fake_slug/fake_channel_id/latest/darwin/x64/Fake Slug.dmg.ref');
           assert.strictEqual(fakeStore.putFile.getCall(3).args[1].toString(), '0.0.2');
         });
+
+        it('should not publish a latest installer whose indexed file is missing', async () => {
+          fakeStore.hasFile.returns(Promise.resolve(false));
+          await positioner.potentiallyUpdateLatestInstallers(
+            lock,
+            fakeApp,
+            Object.assign({}, fakeChannel, {
+              versions: [{
+                name: '0.0.2',
+                rollout: 100,
+                files: [{
+                  type: 'installer',
+                  fileName: 'test.dmg',
+                  platform: 'darwin',
+                  arch: 'x64',
+                }],
+              } as any],
+            }),
+          );
+          assert.strictEqual(fakeStore.putFile.callCount, 0);
+        });
       });
 
       it('should not upload the "Latest" file for any installer type release if it is not the latest release', async () => {

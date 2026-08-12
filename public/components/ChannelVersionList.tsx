@@ -263,25 +263,30 @@ export default class ChannelVersionList extends React.PureComponent<ChannelVersi
     if (count === 0) return;
     if (!confirm(`Are you sure you want to release all ${count} draft(s) for version ${version}?`)) return;
     this.setState({ actionRunning: true });
-    const headers = new Headers();
-    headers.append('Content-Type', 'application/json');
-    const response = await fetch(`/rest/app/${this.props.app.id}/channel/${this.props.channel.id}/temporary_releases/release_all`, {
-      headers,
-      credentials: 'include',
-      method: 'POST',
-      body: JSON.stringify({ version }),
-    });
-    if (response.status === 409) {
-      alert('A release is already in progress, please wait a while and try again');
-    } else if (!response.ok) {
-      const body = await response.json().catch(() => null);
-      const failures = body && Array.isArray(body.results) ? body.results.filter(result => !result.success) : [];
-      const detail = failures.map(result => `\n${result.platform}/${result.arch}: ${result.error}`).join('');
-      alert(`Releasing ${version} failed part way through, the server logs have details.${detail}`);
+    try {
+      const headers = new Headers();
+      headers.append('Content-Type', 'application/json');
+      const response = await fetch(`/rest/app/${this.props.app.id}/channel/${this.props.channel.id}/temporary_releases/release_all`, {
+        headers,
+        credentials: 'include',
+        method: 'POST',
+        body: JSON.stringify({ version }),
+      });
+      if (response.status === 409) {
+        alert('A release is already in progress, please wait a while and try again');
+      } else if (!response.ok) {
+        const body = await response.json().catch(() => null);
+        const failures = body && Array.isArray(body.results) ? body.results.filter(result => !result.success) : [];
+        const detail = failures.map(result => `\n${result.platform}/${result.arch}: ${result.error}`).join('');
+        alert(`Releasing ${version} failed part way through, the server logs have details.${detail}`);
+      }
+      await this.fetch();
+      await this.props.updateApps(false);
+    } catch (err) {
+      alert(`Could not reach Nucleus to release ${version}, it may or may not have started: ${err}`);
+    } finally {
+      this.setState({ actionRunning: false });
     }
-    await this.fetch();
-    await this.props.updateApps(false);
-    this.setState({ actionRunning: false });
   }
 
   private deleteAllDrafts = async () => {

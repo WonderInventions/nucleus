@@ -244,6 +244,17 @@ export default class Positioner {
   private async copyFile(fromKey: string, toKey: string, ref = '') {
     const refKey = `${toKey}.ref`;
     if (!ref || (await this.store.getFile(refKey)).toString() !== ref) {
+      // The stores report a missing object as an empty buffer, so a version
+      // carrying a file that was never positioned would otherwise replace a
+      // good installer with a zero byte one
+      if (!await this.store.hasFile(fromKey)) {
+        console.warn(JSON.stringify({
+          message: 'Skipped publishing a latest installer, the indexed file it copies from is missing',
+          from: fromKey,
+          to: toKey,
+        }));
+        return;
+      }
       await this.store.putFile(
         toKey,
         await this.store.getFile(fromKey),

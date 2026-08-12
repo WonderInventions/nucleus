@@ -26,7 +26,7 @@ describe('release_all endpoint', { timeout: 120000 }, () => {
 
   const contentFor = (fileName: string) => Buffer.from(`fake-content-for-${fileName}`);
 
-  const uploadDraft = async (version: string, platform: string, arch: string, fileNames: string[]) => {
+  const uploadDraft = async (version: string, platform: string, arch: string, fileNames: string[], channelId: string = channel.id!) => {
     const formData = new FormData();
     formData.append('version', version);
     formData.append('platform', platform);
@@ -35,7 +35,7 @@ describe('release_all endpoint', { timeout: 120000 }, () => {
       formData.append(fileName, new Blob([contentFor(fileName)]), fileName);
     }
 
-    const response = await fetch(`http://localhost:8987/rest/app/${app.id}/channel/${channel.id}/upload`, {
+    const response = await fetch(`http://localhost:8987/rest/app/${app.id}/channel/${channelId}/upload`, {
       method: 'POST',
       headers: { Authorization: app.token },
       body: formData,
@@ -49,9 +49,9 @@ describe('release_all endpoint', { timeout: 120000 }, () => {
       .send({ version });
   };
 
-  const listDrafts = async () => {
+  const listDrafts = async (channelId: string = channel.id!) => {
     const response = await helpers.request
-      .get(`/app/${app.id}/channel/${channel.id}/temporary_releases`)
+      .get(`/app/${app.id}/channel/${channelId}/temporary_releases`)
       .send();
     return response.body as ITemporarySave[];
   };
@@ -191,6 +191,49 @@ describe('release_all endpoint', { timeout: 120000 }, () => {
       assert.strictEqual(response.body.released, 2);
       assert.strictEqual(await helpers.store.hasFile(`${app.slug}/${channel.id}/darwin/x64/test-app-4.0.0.dmg`), true);
       assert.strictEqual(await helpers.store.hasFile(`${app.slug}/${channel.id}/darwin/x64/test-app-4.0.0.zip`), true);
+    });
+
+    it('should keep the previous latest installer for an arch whose draft fails', async () => {
+      const partialChannelResp = await helpers.request
+        .post(`/app/${app.id}/channel`)
+        .send({ name: 'Partial' });
+      const partialChannel: NucleusChannel = partialChannelResp.body;
+      const latestArm64 = `${app.slug}/${partialChannel.id}/latest/darwin/arm64/${app.name}.dmg`;
+      const latestX64 = `${app.slug}/${partialChannel.id}/latest/darwin/x64/${app.name}.dmg`;
+
+      await uploadDraft('1.0.0', 'darwin', 'x64', ['partial-1.0.0.dmg'], partialChannel.id);
+      await uploadDraft('1.0.0', 'darwin', 'arm64', ['partial-1.0.0-arm64.dmg'], partialChannel.id);
+      const firstRelease = await releaseAll('1.0.0', partialChannel.id);
+      assert.strictEqual(firstRelease.status, 200, `Releasing 1.0.0 failed: ${JSON.stringify(firstRelease.body)}`);
+
+      const goodArm64 = await helpers.store.getFile(latestArm64);
+      assert.deepStrictEqual(goodArm64, contentFor('partial-1.0.0-arm64.dmg'));
+
+      await uploadDraft('2.0.0', 'darwin', 'x64', ['partial-2.0.0.dmg'], partialChannel.id);
+      await uploadDraft('2.0.0', 'darwin', 'arm64', ['partial-2.0.0-arm64.dmg'], partialChannel.id);
+
+      // Removing the encrypted upload makes only the arm64 draft fail, so the
+      // arm64 file is registered against 2.0.0 but never positioned
+      const arm64Draft = (await listDrafts(partialChannel.id)).find(save => save.version === '2.0.0' && save.arch === 'arm64')!;
+      assert.ok(arm64Draft, 'Could not find the arm64 draft for 2.0.0');
+      await helpers.store.deletePath(`${app.slug}/temp/${arm64Draft.saveString}`);
+
+      const response = await releaseAll('2.0.0', partialChannel.id);
+
+      assert.strictEqual(response.status, 500, `Expected a partial failure: ${JSON.stringify(response.body)}`);
+      assert.strictEqual(response.body.released, 1);
+      assert.strictEqual(response.body.failed, 1);
+
+      assert.deepStrictEqual(
+        await helpers.store.getFile(latestArm64),
+        goodArm64,
+        'The arm64 latest installer should still be the last one that released cleanly',
+      );
+      assert.deepStrictEqual(
+        await helpers.store.getFile(latestX64),
+        contentFor('partial-2.0.0.dmg'),
+        'The x64 latest installer should have been updated by the draft that succeeded',
+      );
     });
 
     it('should return 409 and leave the drafts alone while the channel lock is held', async () => {
