@@ -27,7 +27,7 @@ const updateStaticReleaseMetaData = async (app: NucleusApp, channel: NucleusChan
   const upToDateChannel = (await driver.getChannel(app, channel.id!))!;
 
   const positioner = new Positioner(store);
-  await positioner.withLock(app, async (lock) => {
+  await positioner.withLock(app, upToDateChannel, async (lock) => {
     await positioner.updateDarwinReleasesFiles(lock, app, upToDateChannel, 'arm64');
     await positioner.updateDarwinReleasesFiles(lock, app, upToDateChannel, 'x64');
     await positioner.updateWin32ReleasesFiles(lock, app, upToDateChannel, 'ia32');
@@ -255,7 +255,7 @@ router.post('/:id/channel/:channelId/temporary_releases/:temporarySaveId/release
 
   const positioner = new Positioner(store);
 
-  if (!(await positioner.withLock(req.targetApp, async (lock) => {
+  if (!(await positioner.withLock(req.targetApp, channel, async (lock) => {
     d(`User ${req.user ? req.user.id : "none"} or token (${(req.headers.authorization || "none").substring(0, 4)}...) promoted a temporary release for app: '${req.targetApp.slug}' on channel: ${channel.name} becomes version: ${save.version}`);
 
     const storedFileNames = await driver.registerVersionFiles(save);
@@ -294,7 +294,7 @@ router.post('/:id/channel/:channelId/temporary_releases/:temporarySaveId/release
         d('Database inconsistency detected while releasing for file:', file.id);
       }
     }
-    await positioner.cleanUpTemporaryFile(lock, req.targetApp, save.saveString);
+    await positioner.cleanUpTemporaryFile(lock, req.targetApp, channel, save.saveString);
   }))) {
     return res.status(409).json({ error: 'Release already in progress' });
   }
@@ -318,9 +318,9 @@ router.post('/:id/channel/:channelId/temporary_releases/delete_all', requireLogi
 
   d(`User ${req.user ? req.user.id : "none"} deleting all ${saves.length} temporary releases for app: '${req.targetApp.slug}' on channel: ${channel.name}`);
   const positioner = new Positioner(store);
-  if (!(await positioner.withLock(req.targetApp, async (lock) => {
+  if (!(await positioner.withLock(req.targetApp, channel, async (lock) => {
     for (const save of saves) {
-      await positioner.cleanUpTemporaryFile(lock, req.targetApp, save.saveString);
+      await positioner.cleanUpTemporaryFile(lock, req.targetApp, channel, save.saveString);
       await driver.deleteTemporarySave(save);
     }
   }))) {
@@ -355,7 +355,7 @@ router.post('/:id/channel/:channelId/released_versions/delete_old', requireLogin
   let deletedCount = 0;
   const positioner = new Positioner(store);
   try {
-    if (!(await positioner.withLock(req.targetApp, async (lock) => {
+    if (!(await positioner.withLock(req.targetApp, channel, async (lock) => {
       // Re-fetch the channel inside the lock: a release may have completed
       // between the route-level read and lock acquisition, and the linux
       // repo regeneration during cleanup must advertise it
@@ -373,7 +373,7 @@ router.post('/:id/channel/:channelId/released_versions/delete_old', requireLogin
       // leaves the rows in place so the operation can safely be retried,
       // whereas the reverse order permanently orphans the stored files
       if (!await positioner.cleanUpDeletedVersionFiles(lock, req.targetApp, lockedChannel, versionsToDelete)) {
-        throw new Error('Could not delete stored files, the app lock is no longer valid');
+        throw new Error('Could not delete stored files, the channel lock is no longer valid');
       }
       await driver.deleteVersions(req.targetApp, lockedChannel, versionsToDelete);
       deletedCount = versionsToDelete.length;
@@ -385,7 +385,7 @@ router.post('/:id/channel/:channelId/released_versions/delete_old', requireLogin
       }));
     }))) {
       console.warn(JSON.stringify({
-        message: 'Skipped deleting old dead versions, could not obtain the app lock',
+        message: 'Skipped deleting old dead versions, could not obtain the channel lock',
         ...logContext,
       }));
       return res.status(409).json({ error: 'Operation already in progress' });
@@ -423,8 +423,8 @@ router.post('/:id/channel/:channelId/temporary_releases/:temporarySaveId/delete'
 
   d(`User ${req.user ? req.user.id : "none"} or token (${(req.headers.authorization || "none").substring(0, 4)}...) deleted a temporary release for app: '${req.targetApp.slug}' on channel: ${channel.name} would have been version: ${save.version} with ${save.filenames.length} files`);
   const positioner = new Positioner(store);
-  if (!(await positioner.withLock(req.targetApp, async (lock) => {
-    await positioner.cleanUpTemporaryFile(lock, req.targetApp, save.saveString);
+  if (!(await positioner.withLock(req.targetApp, channel, async (lock) => {
+    await positioner.cleanUpTemporaryFile(lock, req.targetApp, channel, save.saveString);
     await driver.deleteTemporarySave(save);
   }))) {
     return res.status(409).json({ error: 'Operation already in progress' });
@@ -476,7 +476,7 @@ router.get('/:id/channel/:channelId/invalidate-cache', a(async (req, res) => {
   }
 
   const positioner = new Positioner(store);
-  await positioner.withLock(req.targetApp, async (lock) => {
+  await positioner.withLock(req.targetApp, channel, async (lock) => {
     await positioner.potentiallyUpdateLatestInstallers(
       lock,
       req.targetApp,
@@ -520,7 +520,7 @@ router.post('/:id/channel/:channelId/rollout', requireLogin, noPendingMigrations
     const updatedChannel = await driver.setVersionRollout(req.targetApp, channel, req.body.version, req.body.rollout);
     const updatedVersion = updatedChannel.versions.find(v => v.name === req.body.version);
     if (updatedVersion) {
-      await positioner.withLock(req.targetApp, async (lock) => {
+      await positioner.withLock(req.targetApp, updatedChannel, async (lock) => {
         await positioner.potentiallyUpdateLatestInstallers(
           lock,
           req.targetApp,

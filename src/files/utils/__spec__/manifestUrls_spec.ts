@@ -26,7 +26,7 @@ describe('isUrlEmbeddingManifestKey', () => {
     'app/chan/linux/redhat/repodata/repomd.xml',
     'app/chan/versions.json',
     'app/chan/_index/1.0.0/win32/x64/MyApp-full.nupkg',
-    'app/.lock',
+    'app/chan/.lock',
     '__deepcheck',
     'RELEASES',
   ];

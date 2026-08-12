@@ -190,12 +190,12 @@ describe('released_versions endpoints', { timeout: 120000 }, () => {
       assert.strictEqual(response.status, 400);
     });
 
-    it('should leave the database untouched when the app lock cannot be obtained', async () => {
+    it('should leave the database untouched when the channel lock cannot be obtained', async () => {
       // We have 4.0.0, 5.0.0, 6.0.0, 7.0.0 (7.0.0 at 100% rollout)
       await markDead('4.0.0');
 
-      // Hold the app lock, as a concurrent release would
-      await helpers.store.putFile(`${app.slug}/.lock`, Buffer.from('held-by-another-operation'));
+      // Hold the channel lock, as a concurrent release would
+      await helpers.store.putFile(`${app.slug}/${channel.id}/.lock`, Buffer.from('held-by-another-operation'));
       try {
         const response = await helpers.request
           .post(`/app/${app.id}/channel/${channel.id}/released_versions/delete_old`)
@@ -215,7 +215,7 @@ describe('released_versions endpoints', { timeout: 120000 }, () => {
           'Files for 4.0.0 should be untouched after a 409',
         );
       } finally {
-        await helpers.store.deletePath(`${app.slug}/.lock`);
+        await helpers.store.deletePath(`${app.slug}/${channel.id}/.lock`);
       }
 
       // With the lock released the retry succeeds and cleans up fully
@@ -234,6 +234,33 @@ describe('released_versions endpoints', { timeout: 120000 }, () => {
         false,
         'Files for 4.0.0 should be deleted on retry',
       );
+    });
+
+    it('should not block on a lock held by a different channel of the same app', async () => {
+      // We have 5.0.0, 6.0.0, 7.0.0 (7.0.0 at 100% rollout)
+      await markDead('5.0.0');
+
+      const otherChannelResp = await helpers.request
+        .post(`/app/${app.id}/channel`)
+        .send({ name: 'Beta' });
+      assert.strictEqual(otherChannelResp.status, 200, `Channel creation failed: ${JSON.stringify(otherChannelResp.body)}`);
+      const otherChannel: NucleusChannel = otherChannelResp.body;
+
+      await helpers.store.putFile(`${app.slug}/${otherChannel.id}/.lock`, Buffer.from('held-by-another-operation'));
+      try {
+        const response = await helpers.request
+          .post(`/app/${app.id}/channel/${channel.id}/released_versions/delete_old`)
+          .send({ keepCount: 0 });
+
+        assert.strictEqual(response.status, 200, `Expected the operation to proceed: ${JSON.stringify(response.body)}`);
+        assert.strictEqual(response.body.deleted, 1, 'Should delete 5.0.0 while another channel holds its own lock');
+      } finally {
+        await helpers.store.deletePath(`${app.slug}/${otherChannel.id}/.lock`);
+      }
+
+      const currentApp = await getApp();
+      const ch = currentApp.channels.find(c => c.id === channel.id)!;
+      assert.ok(!ch.versions.some(v => v.name === '5.0.0'), 'Version 5.0.0 should be deleted');
     });
   });
 });
