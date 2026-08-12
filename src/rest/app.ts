@@ -60,6 +60,16 @@ const checkFields = (req: Express.Request, res: Express.Response, fields: string
   return true;
 };
 
+/**
+ * Looked up through the channel rather than by bare ID: a save carries its own
+ * channel, so an ID belonging to a different channel would otherwise be
+ * released against that channel while the caller holds the URL channel's lock.
+ */
+const getChannelTemporarySave = async (app: NucleusApp, channel: NucleusChannel, temporarySaveId: string) => {
+  const saves = await driver.getTemporarySaves(app, channel);
+  return saves.find(save => `${save.id}` === temporarySaveId) || null;
+};
+
 const hasPermission = (req: Express.Request, app: NucleusApp) => {
   return req.user && ((req.user as User).isAdmin || app.team.indexOf(req.user.id) !== -1);
 };
@@ -218,7 +228,7 @@ router.get('/:id/channel/:channelId/temporary_releases/:temporarySaveId/:fileNam
       error: 'Channel not found',
     });
   }
-  const save = await driver.getTemporarySave(param(req.params.temporarySaveId));
+  const save = await getChannelTemporarySave(req.targetApp, channel, param(req.params.temporarySaveId));
   if (!save) {
     return res.status(404).json({
       error: 'That temporary save was not found',
@@ -246,7 +256,7 @@ router.post('/:id/channel/:channelId/temporary_releases/:temporarySaveId/release
       error: 'Channel not found',
     });
   }
-  const save = await driver.getTemporarySave(param(req.params.temporarySaveId));
+  const save = await getChannelTemporarySave(req.targetApp, channel, param(req.params.temporarySaveId));
   if (!save) {
     return res.status(404).json({
       error: 'That temporary save was not found',
@@ -414,7 +424,7 @@ router.post('/:id/channel/:channelId/temporary_releases/:temporarySaveId/delete'
       error: 'Channel not found',
     });
   }
-  const save = await driver.getTemporarySave(param(req.params.temporarySaveId));
+  const save = await getChannelTemporarySave(req.targetApp, channel, param(req.params.temporarySaveId));
   if (!save) {
     return res.status(404).json({
       error: 'That temporary save was not found',
