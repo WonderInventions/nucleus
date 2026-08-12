@@ -18,7 +18,6 @@ export abstract class IDBDriver {
   public abstract renameChannel(app: NucleusApp, channel: NucleusChannel, newName: string): Promise<NucleusChannel | null>;
   public abstract getChannel(app: NucleusApp, channelId: ChannelID): Promise<NucleusChannel | null>;
   public abstract deleteTemporarySave(save: ITemporarySave): Promise<void>;
-  public abstract getTemporarySave(temporaryId: string | number): Promise<ITemporarySave | null>;
   public abstract getTemporarySaves(app: NucleusApp, channel: NucleusChannel): Promise<ITemporarySave[]>;
   public abstract saveTemporaryVersionFiles(app: NucleusApp, channel: NucleusChannel, version: string, filenames: string[], arch: string, platform: NucleusPlatform): Promise<ITemporarySave>;
   public abstract registerVersionFiles(save: ITemporarySave): Promise<string[]>;
