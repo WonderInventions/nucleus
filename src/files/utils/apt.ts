@@ -173,7 +173,13 @@ export const addFileToAptRepo = async (store: IFileStore, {
       for (const otherFile of latestVersionFiles) {
         if (otherFile.fileName !== file.fileName || internalVersion.name !== latestVersion.name) {
           const fname = `${latestVersion.name}-${otherFile.fileName}`;
-          await fs.writeFile(`${tmpDir}/binary/${fname}`, await store.getFile(getAptPackageKey(app, channel, latestVersion.name, otherFile.fileName)));
+          const packageKey = getAptPackageKey(app, channel, latestVersion.name, otherFile.fileName);
+          // A file can be registered against the version before its package
+          // reaches the store, and the store reports the missing key as an
+          // empty buffer, which dpkg-scanpackages rejects
+          if (await store.getFileSize(packageKey)) {
+            await fs.writeFile(`${tmpDir}/binary/${fname}`, await store.getFile(packageKey));
+          }
         }
       }
     }

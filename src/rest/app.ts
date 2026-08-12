@@ -379,18 +379,6 @@ router.post('/:id/channel/:channelId/temporary_releases/release_all', requireLog
 
     const upToDateChannel = (await driver.getChannel(req.targetApp, param(req.params.channelId)))!;
     const storedVersion = upToDateChannel.versions.find(v => v.name === version);
-    if (!storedVersion) {
-      for (const save of registeredSaves) {
-        results.push({
-          saveId: save.id,
-          platform: save.platform,
-          arch: save.arch,
-          success: false,
-          error: `Version ${version} was not found on the channel after registering its files`,
-        });
-      }
-      return;
-    }
 
     // Workers must never reject: runPQ abandons its in-flight tasks on the
     // first rejection, which would strand the remaining groups
@@ -398,6 +386,9 @@ router.post('/:id/channel/:channelId/temporary_releases/release_all', requireLog
       for (const save of group) {
         const storedFileNames = storedFileNamesBySave.get(save.id)!;
         try {
+          if (!storedVersion) {
+            throw new Error(`Version ${version} was not found on the channel after registering its files`);
+          }
           const storedFiles = storedVersion.files.filter(f => storedFileNames.includes(f.fileName) && f.arch === save.arch && f.platform === save.platform);
           for (const file of storedFiles) {
             d(`Releasing file: ${file.fileName} to version: ${version} for (${req.targetApp.slug}/${channel.name})`);
@@ -438,15 +429,18 @@ router.post('/:id/channel/:channelId/temporary_releases/release_all', requireLog
 
     await runPQ(groupSavesForRelease(registeredSaves), releaseGroup, RELEASE_ALL_CONCURRENCY);
 
-    const releasedIds = new Set(results.filter(r => r.success).map(r => r.saveId));
-    if (releasedIds.size === 0) return;
+    if (results.some(r => r.success)) {
+      await positioner.potentiallyUpdateLatestInstallers(
+        lock,
+        req.targetApp,
+        upToDateChannel,
+      );
+    }
 
-    await positioner.potentiallyUpdateLatestInstallers(
-      lock,
-      req.targetApp,
-      upToDateChannel,
-    );
-    for (const save of registeredSaves.filter(s => releasedIds.has(s.id))) {
+    // Registering a save consumes its draft row, which holds the key its files
+    // were encrypted with, so a failed save's payload is unreadable rather than
+    // retryable and would sit in the store forever
+    for (const save of registeredSaves) {
       await positioner.cleanUpTemporaryFile(lock, req.targetApp, channel, save.saveString);
     }
   }))) {

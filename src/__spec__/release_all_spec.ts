@@ -212,17 +212,26 @@ describe('release_all endpoint', { timeout: 120000 }, () => {
       await uploadDraft('2.0.0', 'darwin', 'x64', ['partial-2.0.0.dmg'], partialChannel.id);
       await uploadDraft('2.0.0', 'darwin', 'arm64', ['partial-2.0.0-arm64.dmg'], partialChannel.id);
 
-      // Removing the encrypted upload makes only the arm64 draft fail, so the
-      // arm64 file is registered against 2.0.0 but never positioned
+      // Truncating the encrypted upload past its initialisation vector makes
+      // only the arm64 draft fail, so the arm64 file is registered against
+      // 2.0.0 but never positioned
       const arm64Draft = (await listDrafts(partialChannel.id)).find(save => save.version === '2.0.0' && save.arch === 'arm64')!;
       assert.ok(arm64Draft, 'Could not find the arm64 draft for 2.0.0');
-      await helpers.store.deletePath(`${app.slug}/temp/${arm64Draft.saveString}`);
+      const arm64Payload = `${app.slug}/temp/${arm64Draft.saveString}/partial-2.0.0-arm64.dmg`;
+      assert.strictEqual(await helpers.store.hasFile(arm64Payload), true, 'Expected the arm64 payload to exist before the release');
+      await helpers.store.putFile(arm64Payload, Buffer.from('short'));
 
       const response = await releaseAll('2.0.0', partialChannel.id);
 
       assert.strictEqual(response.status, 500, `Expected a partial failure: ${JSON.stringify(response.body)}`);
       assert.strictEqual(response.body.released, 1);
       assert.strictEqual(response.body.failed, 1);
+
+      assert.strictEqual(
+        await helpers.store.hasFile(arm64Payload),
+        false,
+        'The failed draft was consumed, so its encrypted payload should not be left behind',
+      );
 
       assert.deepStrictEqual(
         await helpers.store.getFile(latestArm64),
