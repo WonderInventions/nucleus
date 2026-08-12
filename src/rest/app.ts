@@ -9,6 +9,8 @@ import driver from '../db/driver';
 import store from '../files/store';
 import Positioner from '../files/Positioner';
 import { generateSHAs } from '../files/utils/sha';
+import { runPQ } from '../files/utils/p-queue';
+import { groupSavesForRelease } from '../files/utils/release-groups';
 
 import { requireLogin, noPendingMigrations } from './_helpers';
 
@@ -310,6 +312,160 @@ router.post('/:id/channel/:channelId/temporary_releases/:temporarySaveId/release
   }
 
   res.json({ success: true });
+}));
+
+interface ReleaseAllResult {
+  saveId: any;
+  platform: string;
+  arch: string;
+  success: boolean;
+  storedFileNames?: string[];
+  error?: string;
+}
+
+const RELEASE_ALL_CONCURRENCY = 4;
+
+router.post('/:id/channel/:channelId/temporary_releases/release_all', requireLogin, noPendingMigrations, a(async (req, res) => {
+  if (stopNoPerms(req, res)) return;
+  const channel = await driver.getChannel(req.targetApp, param(req.params.channelId));
+  if (!channel) {
+    return res.status(404).json({
+      error: 'Channel not found',
+    });
+  }
+  if (!checkField(req, res, 'version')) return;
+  const version = req.body.version;
+
+  const saves = (await driver.getTemporarySaves(req.targetApp, channel)).filter(save => save.version === version);
+  if (saves.length === 0) {
+    return res.status(404).json({
+      error: 'No temporary saves found for that version on this channel',
+    });
+  }
+
+  const logContext = {
+    app: req.targetApp.slug,
+    channel: channel.id,
+    version,
+    user: req.user ? req.user.id : null,
+  };
+
+  const results: ReleaseAllResult[] = [];
+  const positioner = new Positioner(store);
+
+  if (!(await positioner.withLock(req.targetApp, channel, async (lock) => {
+    d(`User ${req.user ? req.user.id : "none"} or token (${(req.headers.authorization || "none").substring(0, 4)}...) promoted all ${saves.length} temporary releases for app: '${req.targetApp.slug}' on channel: ${channel.name} becomes version: ${version}`);
+
+    // Registration is serialized because it find-or-creates the single Version
+    // row shared by every save being released here
+    const storedFileNamesBySave = new Map<any, string[]>();
+    const registeredSaves: ITemporarySave[] = [];
+    for (const save of saves) {
+      try {
+        storedFileNamesBySave.set(save.id, await driver.registerVersionFiles(save));
+        registeredSaves.push(save);
+      } catch (err) {
+        console.error(JSON.stringify({
+          message: 'Failed to register version files while releasing all drafts',
+          ...logContext,
+          save: { id: save.id, platform: save.platform, arch: save.arch },
+          err: `${err}`,
+        }));
+        results.push({ saveId: save.id, platform: save.platform, arch: save.arch, success: false, error: `${err}` });
+      }
+    }
+    // Also guards runPQ, which never resolves when handed an empty list
+    if (registeredSaves.length === 0) return;
+
+    const upToDateChannel = (await driver.getChannel(req.targetApp, param(req.params.channelId)))!;
+    const storedVersion = upToDateChannel.versions.find(v => v.name === version);
+    if (!storedVersion) {
+      for (const save of registeredSaves) {
+        results.push({
+          saveId: save.id,
+          platform: save.platform,
+          arch: save.arch,
+          success: false,
+          error: `Version ${version} was not found on the channel after registering its files`,
+        });
+      }
+      return;
+    }
+
+    // Workers must never reject: runPQ abandons its in-flight tasks on the
+    // first rejection, which would strand the remaining groups
+    const releaseGroup = async (group: ITemporarySave[]) => {
+      for (const save of group) {
+        const storedFileNames = storedFileNamesBySave.get(save.id)!;
+        try {
+          const storedFiles = storedVersion.files.filter(f => storedFileNames.includes(f.fileName) && f.arch === save.arch && f.platform === save.platform);
+          for (const file of storedFiles) {
+            d(`Releasing file: ${file.fileName} to version: ${version} for (${req.targetApp.slug}/${channel.name})`);
+
+            const data = await positioner.getTemporaryFile(req.targetApp, save.saveString, file.fileName, save.cipherPassword);
+            const upToDateFile = await driver.storeSHAs(
+              file,
+              generateSHAs(data),
+            );
+            if (!upToDateFile) {
+              d('Database inconsistency detected while releasing for file:', file.id);
+              continue;
+            }
+            // Patched before handleUpload because the win32 RELEASES file
+            // embeds the sha1 read back off the version
+            storedVersion.files = storedVersion.files.map(f => f.id === upToDateFile.id ? upToDateFile : f);
+
+            await positioner.handleUpload(lock, {
+              file: upToDateFile,
+              app: req.targetApp,
+              channel: upToDateChannel,
+              internalVersion: storedVersion,
+              fileData: data,
+            });
+          }
+          results.push({ saveId: save.id, platform: save.platform, arch: save.arch, success: true, storedFileNames });
+        } catch (err) {
+          console.error(JSON.stringify({
+            message: 'Failed to release a draft while releasing all drafts',
+            ...logContext,
+            save: { id: save.id, platform: save.platform, arch: save.arch },
+            err: `${err}`,
+          }));
+          results.push({ saveId: save.id, platform: save.platform, arch: save.arch, success: false, error: `${err}` });
+        }
+      }
+    };
+
+    await runPQ(groupSavesForRelease(registeredSaves), releaseGroup, RELEASE_ALL_CONCURRENCY);
+
+    const releasedIds = new Set(results.filter(r => r.success).map(r => r.saveId));
+    if (releasedIds.size === 0) return;
+
+    await positioner.potentiallyUpdateLatestInstallers(
+      lock,
+      req.targetApp,
+      upToDateChannel,
+    );
+    for (const save of registeredSaves.filter(s => releasedIds.has(s.id))) {
+      await positioner.cleanUpTemporaryFile(lock, req.targetApp, channel, save.saveString);
+    }
+  }))) {
+    return res.status(409).json({ error: 'Release already in progress' });
+  }
+
+  const failed = results.filter(r => !r.success);
+  const released = results.length - failed.length;
+  if (failed.length > 0) {
+    console.error(JSON.stringify({
+      message: 'Released some but not all drafts',
+      ...logContext,
+      released,
+      failed: failed.length,
+    }));
+    return res.status(500).json({ success: false, version, released, failed: failed.length, results });
+  }
+
+  res.json({ success: true, version, released, results });
 }));
 
 router.post('/:id/channel/:channelId/temporary_releases/delete_all', requireLogin, noPendingMigrations, a(async (req, res) => {

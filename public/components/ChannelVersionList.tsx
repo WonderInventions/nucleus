@@ -118,6 +118,20 @@ export default class ChannelVersionList extends React.PureComponent<ChannelVersi
     });
   }
 
+  private get draftVersions() {
+    const versions: string[] = [];
+    for (const draft of this.state.temporaryVersions as ITemporarySave[]) {
+      if (versions.indexOf(draft.version) === -1) {
+        versions.push(draft.version);
+      }
+    }
+    return versions;
+  }
+
+  private draftCountFor(version: string) {
+    return (this.state.temporaryVersions as ITemporarySave[]).filter(draft => draft.version === version).length;
+  }
+
   private get hasOldDeadVersions() {
     const versions = this.props.channel.versions;
     const sorted = [...versions].sort((a, b) => semver.rcompare(a.name, b.name));
@@ -167,7 +181,17 @@ export default class ChannelVersionList extends React.PureComponent<ChannelVersi
             ? <h5>No Draft Versions</h5>
             : (
               <div>
-                <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 8 }}>
+                <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 8, gap: 8 }}>
+                  {this.draftVersions.map(version => (
+                    <AkButton
+                      key={version}
+                      appearance="primary"
+                      onClick={this.releaseAllDrafts(version)}
+                      isDisabled={this.state.actionRunning || this.props.hasPendingMigration}
+                    >
+                      Release All {version} ({this.draftCountFor(version)})
+                    </AkButton>
+                  ))}
                   <AkButton
                     appearance="danger"
                     onClick={this.deleteAllDrafts}
@@ -232,6 +256,32 @@ export default class ChannelVersionList extends React.PureComponent<ChannelVersi
         modalOpen: false,
       });
     }
+  }
+
+  private releaseAllDrafts = (version: string) => async () => {
+    const count = this.draftCountFor(version);
+    if (count === 0) return;
+    if (!confirm(`Are you sure you want to release all ${count} draft(s) for version ${version}?`)) return;
+    this.setState({ actionRunning: true });
+    const headers = new Headers();
+    headers.append('Content-Type', 'application/json');
+    const response = await fetch(`/rest/app/${this.props.app.id}/channel/${this.props.channel.id}/temporary_releases/release_all`, {
+      headers,
+      credentials: 'include',
+      method: 'POST',
+      body: JSON.stringify({ version }),
+    });
+    if (response.status === 409) {
+      alert('A release is already in progress, please wait a while and try again');
+    } else if (!response.ok) {
+      const body = await response.json().catch(() => null);
+      const failures = body && Array.isArray(body.results) ? body.results.filter(result => !result.success) : [];
+      const detail = failures.map(result => `\n${result.platform}/${result.arch}: ${result.error}`).join('');
+      alert(`Releasing ${version} failed part way through, the server logs have details.${detail}`);
+    }
+    await this.fetch();
+    await this.props.updateApps(false);
+    this.setState({ actionRunning: false });
   }
 
   private deleteAllDrafts = async () => {

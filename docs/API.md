@@ -7,6 +7,7 @@ considered "Public API" and will be versioned / migrated appropriately.
 The following API's, concepts and contracts are considered "Public API":
 
 * The [Upload Endpoint](Uploading.md)
+* The [Release All Endpoint](Uploading.md#releasing)
 * The [healthcheck and deepcheck endpoints](Endpoints.md)
 * The style of the generated path to the icons files
   * `/:appSlug/icon.png`
