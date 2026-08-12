@@ -205,17 +205,6 @@ export default class SequelizeDriver extends BaseDriver {
     };
   }
 
-  public async getTemporarySave(temporaryId: string | number) {
-    const save = await TemporarySave.findOne<TemporarySave>({
-      where: {
-        id: typeof temporaryId === 'string' ? parseInt(temporaryId, 10) : temporaryId,
-      },
-      include: [TemporarySaveFile],
-    });
-    if (!save) return null;
-    return this.fixSaveStruct(save);
-  }
-
   public async getTemporarySaves(app: NucleusApp, channel: NucleusChannel) {
     const rawChannel = await Channel.findOne<Channel>({
       where: {
