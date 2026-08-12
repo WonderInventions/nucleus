@@ -54,8 +54,8 @@ export default class Positioner {
     return Buffer.concat([decipher.update(data), decipher.final()]);
   }
 
-  public async cleanUpTemporaryFile(lock: PositionerLock, app: NucleusApp, saveString: string) {
-    if (lock !== await this.currentLock(app)) return;
+  public async cleanUpTemporaryFile(lock: PositionerLock, app: NucleusApp, channel: NucleusChannel, saveString: string) {
+    if (lock !== await this.currentLock(app, channel)) return;
     d(`Deleting all temporary files for app: ${app.slug} in save ID: ${saveString}`);
     await this.store.deletePath(path.join(app.slug, 'temp', saveString));
   }
@@ -69,7 +69,7 @@ export default class Positioner {
    * deleted, so the metadata no longer references these package files.
    */
   public async cleanUpDeletedVersionFiles(lock: PositionerLock, app: NucleusApp, channel: NucleusChannel, versions: NucleusVersion[]): Promise<boolean> {
-    if (lock !== await this.currentLock(app)) {
+    if (lock !== await this.currentLock(app, channel)) {
       console.warn(JSON.stringify({
         message: 'Skipped deleting stored files for deleted versions, the given lock is not current',
         app: app.slug,
@@ -166,7 +166,7 @@ export default class Positioner {
     fileData: Buffer;
   }) {
     // Validate arch
-    if (lock !== await this.currentLock(app)) return;
+    if (lock !== await this.currentLock(app, channel)) return;
     if (file.arch !== 'ia32' && file.arch !== 'x64' && file.arch !== 'arm64') return;
     d(`Handling upload (${file.fileName}) for app (${app.slug}) and channel (${channel.name}) for version (${internalVersion.name}) on platform/arch (${file.platform}/${file.arch})`);
 
@@ -208,7 +208,7 @@ export default class Positioner {
    * to semver.
    */
   public async potentiallyUpdateLatestInstallers(lock: PositionerLock, app: NucleusApp, channel: NucleusChannel) {
-    if (lock !== await this.currentLock(app)) return;
+    if (lock !== await this.currentLock(app, channel)) return;
 
     const latestThings: {
       [latestKey: string]: {
@@ -258,7 +258,7 @@ export default class Positioner {
   }
 
   public updateWin32ReleasesFiles = async (lock: PositionerLock, app: NucleusApp, channel: NucleusChannel, arch: string) => {
-    if (lock !== await this.currentLock(app)) return;
+    if (lock !== await this.currentLock(app, channel)) return;
     let cachedFileSizes = new Map<string, number>();
     return await updateWin32ReleasesFiles({
       app,
@@ -291,7 +291,7 @@ export default class Positioner {
   }
 
   public updateDarwinReleasesFiles = async (lock: PositionerLock, app: NucleusApp, channel: NucleusChannel, arch: string) => {
-    if (lock !== await this.currentLock(app)) return;
+    if (lock !== await this.currentLock(app, channel)) return;
     return await updateDarwinReleasesFiles({
       app,
       channel,
@@ -338,16 +338,20 @@ export default class Positioner {
     }
   }
 
+  private lockKey(app: NucleusApp, channel: NucleusChannel) {
+    return path.posix.join(app.slug, channel.id!, '.lock');
+  }
+
   /**
    * Don't use unless you know what you're doing
    */
-  public currentLock = async (app: NucleusApp) => {
-    const lockFile = path.posix.join(app.slug, '.lock');
+  public currentLock = async (app: NucleusApp, channel: NucleusChannel) => {
+    const lockFile = this.lockKey(app, channel);
     return (await this.store.getFile(lockFile)).toString('utf8');
   }
 
-  public requestLock = async (app: NucleusApp): Promise<PositionerLock | null> => {
-    const lockFile = path.posix.join(app.slug, '.lock');
+  public requestLock = async (app: NucleusApp, channel: NucleusChannel): Promise<PositionerLock | null> => {
+    const lockFile = this.lockKey(app, channel);
     const lock = randomUUID();
     const currentLock = (await this.store.getFile(lockFile)).toString('utf8');
     if (currentLock === '') {
@@ -357,24 +361,24 @@ export default class Positioner {
     return null;
   }
 
-  public releaseLock = async (app: NucleusApp, lock: PositionerLock) => {
-    const lockFile = path.posix.join(app.slug, '.lock');
+  public releaseLock = async (app: NucleusApp, channel: NucleusChannel, lock: PositionerLock) => {
+    const lockFile = this.lockKey(app, channel);
     const currentLock = (await this.store.getFile(lockFile)).toString('utf8');
     if (currentLock === lock) {
       await this.store.deletePath(lockFile);
     }
   }
 
-  public withLock = async (app: NucleusApp, fn: (lock: PositionerLock) => Promise<void>): Promise<boolean> => {
-    const lock = await this.requestLock(app);
+  public withLock = async (app: NucleusApp, channel: NucleusChannel, fn: (lock: PositionerLock) => Promise<void>): Promise<boolean> => {
+    const lock = await this.requestLock(app, channel);
     if (!lock) return false;
     try {
       await fn(lock);
     } catch (err) {
-      await this.releaseLock(app, lock);
+      await this.releaseLock(app, channel, lock);
       throw err;
     }
-    await this.releaseLock(app, lock);
+    await this.releaseLock(app, channel, lock);
     return true;
   }
 

@@ -94,4 +94,86 @@ describe('temporary_releases endpoints', { timeout: 60000 }, () => {
       assert.strictEqual(response.body.error, 'Channel not found');
     });
   });
+
+  describe('temporary saves addressed through the wrong channel', () => {
+    const version = '3.0.0';
+    const fileName = `test-app-${version}.dmg`;
+    let otherChannel: NucleusChannel;
+    let saveId: string;
+
+    const listDrafts = async () => {
+      const resp = await helpers.request
+        .get(`/app/${app.id}/channel/${channel.id}/temporary_releases`)
+        .send();
+      return resp.body as any[];
+    };
+
+    before(async () => {
+      const otherChannelResp = await helpers.request
+        .post(`/app/${app.id}/channel`)
+        .send({ name: 'Other' });
+      assert.strictEqual(otherChannelResp.status, 200, `Channel creation failed: ${JSON.stringify(otherChannelResp.body)}`);
+      otherChannel = otherChannelResp.body;
+
+      const upload = await uploadDraft(version, fileName);
+      assert.strictEqual(upload.status, 200, `Upload failed: ${JSON.stringify(upload.body)}`);
+
+      const save = (await listDrafts()).find(s => s.version === version);
+      assert.ok(save, `Could not find the draft for ${version}`);
+      saveId = save.id;
+    });
+
+    // Runs before the release attempt below, which would otherwise consume the
+    // draft and leave this asserting on an already-deleted save
+    it('should not serve draft files through another channel', async () => {
+      const response = await helpers.request
+        .get(`/app/${app.id}/channel/${otherChannel.id}/temporary_releases/${saveId}/${fileName}`)
+        .send();
+
+      assert.strictEqual(response.status, 404);
+      assert.strictEqual(response.body.error, 'That temporary save was not found');
+    });
+
+    it('should not release a draft owned by another channel', async () => {
+      const response = await helpers.request
+        .post(`/app/${app.id}/channel/${otherChannel.id}/temporary_releases/${saveId}/release`)
+        .send();
+
+      assert.strictEqual(response.status, 404, `Expected a 404: ${JSON.stringify(response.body)}`);
+      assert.strictEqual(response.body.error, 'That temporary save was not found');
+    });
+
+    it('should leave the draft intact after a rejected cross-channel release', async () => {
+      assert.ok(
+        (await listDrafts()).some(s => `${s.id}` === `${saveId}`),
+        'The draft should survive a release attempt made through the wrong channel',
+      );
+    });
+
+    it('should not delete a draft owned by another channel', async () => {
+      const response = await helpers.request
+        .post(`/app/${app.id}/channel/${otherChannel.id}/temporary_releases/${saveId}/delete`)
+        .send();
+
+      assert.strictEqual(response.status, 404);
+      assert.strictEqual(response.body.error, 'That temporary save was not found');
+      assert.ok(
+        (await listDrafts()).some(s => `${s.id}` === `${saveId}`),
+        'The draft should survive a delete attempt made through the wrong channel',
+      );
+    });
+
+    it('should still release the draft through its own channel', async () => {
+      const response = await helpers.request
+        .post(`/app/${app.id}/channel/${channel.id}/temporary_releases/${saveId}/release`)
+        .send();
+
+      assert.strictEqual(response.status, 200, `Release failed: ${JSON.stringify(response.body)}`);
+      assert.strictEqual(
+        await helpers.store.hasFile(`${app.slug}/${channel.id}/darwin/x64/${fileName}`),
+        true,
+        'The released artifact should be positioned on the owning channel',
+      );
+    });
+  });
 });

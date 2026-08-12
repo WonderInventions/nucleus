@@ -18,6 +18,10 @@ const fakeChannel: NucleusChannel = {
   id: 'fake_channel_id',
   versions: [],
 } as any;
+const fakeChannel2: NucleusChannel = {
+  id: 'fake_channel_id_2',
+  versions: [],
+} as any;
 
 const promiseStub = () => {
   const s = stub();
@@ -89,7 +93,7 @@ describe('Positioner', () => {
     positioner = new Positioner(fakeStore);
     originalDateToString = stub(Date.prototype, 'toString');
     originalDateToString.returns('MyDate');
-    lock = (await positioner.requestLock(fakeApp))!;
+    lock = (await positioner.requestLock(fakeApp, fakeChannel))!;
     fakeStore.getFile.onSecondCall().returns(Buffer.from(lock));
     fakeStore.putFile.reset();
     fakeStore.putFile.returns(true);
@@ -98,7 +102,7 @@ describe('Positioner', () => {
 
   afterEach(async () => {
     originalDateToString.restore();
-    await positioner.releaseLock(fakeApp, lock);
+    await positioner.releaseLock(fakeApp, fakeChannel, lock);
   });
 
   it('should not position unknown arches', async () => {
@@ -814,34 +818,45 @@ describe('Positioner', () => {
     });
 
     it('should obtain the lock when nothing has claimed it', async () => {
-      assert.notStrictEqual(await positioner.requestLock(fakeApp), null);
+      assert.notStrictEqual(await positioner.requestLock(fakeApp, fakeChannel), null);
     });
 
     it('should obtain two locks for different apps simultaneously', async () => {
-      assert.notStrictEqual(await positioner.requestLock(fakeApp), null);
-      assert.notStrictEqual(await positioner.requestLock(fakeApp2), null);
+      assert.notStrictEqual(await positioner.requestLock(fakeApp, fakeChannel), null);
+      assert.notStrictEqual(await positioner.requestLock(fakeApp2, fakeChannel), null);
     });
 
-    it('should not issue two locks for the same app simultaneously', async () => {
-      assert.notStrictEqual(await positioner.requestLock(fakeApp), null);
-      assert.strictEqual(await positioner.requestLock(fakeApp), null);
+    it('should obtain two locks for different channels of the same app simultaneously', async () => {
+      assert.notStrictEqual(await positioner.requestLock(fakeApp, fakeChannel), null);
+      assert.notStrictEqual(await positioner.requestLock(fakeApp, fakeChannel2), null);
     });
 
-    it('should issue two locks for the same app sequentially', async () => {
-      const lock = (await positioner.requestLock(fakeApp))!;
+    it('should not issue two locks for the same channel simultaneously', async () => {
+      assert.notStrictEqual(await positioner.requestLock(fakeApp, fakeChannel), null);
+      assert.strictEqual(await positioner.requestLock(fakeApp, fakeChannel), null);
+    });
+
+    it('should issue two locks for the same channel sequentially', async () => {
+      const lock = (await positioner.requestLock(fakeApp, fakeChannel))!;
       assert.notStrictEqual(lock, null);
-      await positioner.releaseLock(fakeApp, lock);
-      const secondLock = await positioner.requestLock(fakeApp);
+      await positioner.releaseLock(fakeApp, fakeChannel, lock);
+      const secondLock = await positioner.requestLock(fakeApp, fakeChannel);
       assert.notStrictEqual(secondLock, null);
       assert.notStrictEqual(lock, secondLock, 'locks should be unique');
     });
 
     it('should not release a lock if the existing lock is not provided', async () => {
-      const lock = (await positioner.requestLock(fakeApp))!;
-      await positioner.releaseLock(fakeApp, 'this-is-not-the-lock');
-      assert.strictEqual(await positioner.requestLock(fakeApp), null);
-      await positioner.releaseLock(fakeApp, lock);
-      assert.notStrictEqual(await positioner.requestLock(fakeApp), null);
+      const lock = (await positioner.requestLock(fakeApp, fakeChannel))!;
+      await positioner.releaseLock(fakeApp, fakeChannel, 'this-is-not-the-lock');
+      assert.strictEqual(await positioner.requestLock(fakeApp, fakeChannel), null);
+      await positioner.releaseLock(fakeApp, fakeChannel, lock);
+      assert.notStrictEqual(await positioner.requestLock(fakeApp, fakeChannel), null);
+    });
+
+    it('should not release a lock held on a different channel', async () => {
+      const lock = (await positioner.requestLock(fakeApp, fakeChannel))!;
+      await positioner.releaseLock(fakeApp, fakeChannel2, lock);
+      assert.strictEqual(await positioner.requestLock(fakeApp, fakeChannel), null);
     });
   });
 });

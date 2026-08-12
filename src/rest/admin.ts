@@ -18,11 +18,16 @@ adminRouter.get('/release-locks', a(async (req, res) => {
   d(`admin user ${req.user?.id} is clearing all existing locks`);
 
   for (const app of apps) {
-    const lock = await positioner.currentLock(app);
-    if (lock) {
-      d('clearing lock for app:', app.slug);
-      await positioner.releaseLock(app, lock);
+    for (const channel of app.channels) {
+      const lock = await positioner.currentLock(app, channel);
+      if (lock) {
+        d('clearing lock for app:', app.slug, 'channel:', channel.id);
+        await positioner.releaseLock(app, channel, lock);
+      }
     }
+    // Locks written before per-channel locking existed live at the app root and
+    // are no longer read by anything, so purge them unconditionally
+    await store.deletePath(`${app.slug}/.lock`);
   }
 
   d('locks cleared');
