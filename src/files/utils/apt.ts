@@ -100,20 +100,6 @@ const writeAptMetadata = async (tmpDir: string, app: NucleusApp) => {
 export const getAptPackageKey = (app: NucleusApp, channel: NucleusChannel, versionName: string, fileName: string) =>
   path.posix.join(app.slug, channel.id!, 'linux', 'debian', 'binary', `${versionName}-${fileName}`);
 
-/**
- * Adds a deb to the pool the repo metadata is built from.  Advertising it is a separate step, so
- * that a release positions every package before any of them reaches the published metadata.
- */
-export const addDebToPool = async (store: IFileStore, {
-  app,
-  channel,
-  internalVersion,
-  file,
-  fileData,
-}: HandlePlatformUploadOpts) => {
-  await store.putFile(getAptPackageKey(app, channel, internalVersion.name, file.fileName), fileData, true);
-};
-
 const stageAdvertisedDebs = async (
   store: IFileStore,
   app: NucleusApp,

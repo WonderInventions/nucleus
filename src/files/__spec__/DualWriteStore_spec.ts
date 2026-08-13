@@ -8,6 +8,7 @@ type FakeStore = { [K in keyof IFileStore]: SinonStub };
 
 const makeFakeStore = (): FakeStore => ({
   putFile: stub().resolves(true),
+  copyFile: stub().resolves(true),
   hasFile: stub().resolves(true),
   getFile: stub().resolves(Buffer.from('primary-content')),
   getFileSize: stub().resolves(123),
@@ -90,6 +91,52 @@ describe('DualWriteStore', () => {
       assert.strictEqual(await store.putFile('myKey', Buffer.from('value'), true), true);
 
       assert.strictEqual(secondary.putFile.callCount, 3);
+    });
+  });
+
+  describe('copyFile', () => {
+    it('should copy on both stores rather than moving bytes through the app', async () => {
+      assert.strictEqual(await store.copyFile('from', 'to', true), true);
+
+      assert.ok(primary.copyFile.calledOnceWith('from', 'to', true));
+      assert.ok(secondary.copyFile.calledOnceWith('from', 'to', true));
+      assert.strictEqual(primary.getFile.callCount, 0);
+      assert.strictEqual(secondary.putFile.callCount, 0);
+    });
+
+    it('should not touch the secondary when the primary skipped and the secondary has the key', async () => {
+      primary.copyFile.resolves(false);
+      secondary.hasFile.resolves(true);
+
+      assert.strictEqual(await store.copyFile('from', 'to'), false);
+
+      assert.strictEqual(secondary.copyFile.callCount, 0);
+      assert.strictEqual(secondary.putFile.callCount, 0);
+    });
+
+    // The secondary may not hold the source, which is not drift worth reporting: the bytes the
+    // primary now has are what the mirror needs either way
+    it('should fall back to mirroring the primary bytes when the copy on the secondary fails', async () => {
+      secondary.copyFile.rejects(new Error('no such source'));
+      primary.getFile.resolves(Buffer.from('copied-content'));
+
+      assert.strictEqual(await store.copyFile('from', 'to', true), true);
+
+      assert.strictEqual(secondary.putFile.callCount, 1);
+      assert.strictEqual(secondary.putFile.firstCall.args[0], 'to');
+      assert.strictEqual(secondary.putFile.firstCall.args[1].toString(), 'copied-content');
+      assert.strictEqual(secondary.putFile.firstCall.args[2], true);
+    });
+
+    it('should heal the secondary when the primary skipped and the secondary is missing the key', async () => {
+      primary.copyFile.resolves(false);
+      secondary.hasFile.resolves(false);
+      primary.getFile.resolves(Buffer.from('authoritative-content'));
+
+      assert.strictEqual(await store.copyFile('from', 'to'), false);
+
+      assert.strictEqual(secondary.putFile.callCount, 1);
+      assert.strictEqual(secondary.putFile.firstCall.args[1].toString(), 'authoritative-content');
     });
   });
 

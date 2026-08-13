@@ -142,6 +142,11 @@ interface HandlePlatformUploadOpts {
 
 interface IFileStore {
   putFile(key: string, data: Buffer, overwriteExisting?: boolean): Promise<boolean>;
+  /**
+   * Copies an object the store already holds, without the bytes leaving it.  Same return as
+   * putFile: true when it wrote, false when the key was there and overwriting was not asked for.
+   */
+  copyFile(fromKey: string, toKey: string, overwriteExisting?: boolean): Promise<boolean>;
   hasFile(key: string): Promise<boolean>;
   getFile(key: string): Promise<Buffer>;
   getFileSize(key: string): Promise<number>;

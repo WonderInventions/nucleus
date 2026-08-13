@@ -28,6 +28,15 @@ export default class LocalStore implements IFileStore {
     return false;
   }
 
+  public async copyFile(fromKey: string, toKey: string, overwrite = false) {
+    if (overwrite || !await pathExists(this.getPath(toKey))) {
+      await fs.mkdir(path.dirname(this.getPath(toKey)), { recursive: true });
+      await fs.copyFile(this.getPath(fromKey), this.getPath(toKey));
+      return true;
+    }
+    return false;
+  }
+
   public async getFile(key: string) {
     if (await this.hasFile(key)) {
       return await fs.readFile(this.getPath(key));

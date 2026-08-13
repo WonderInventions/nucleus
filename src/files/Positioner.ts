@@ -4,10 +4,11 @@ import debug from 'debug';
 import * as path from 'path';
 import * as semver from 'semver';
 
-import { initializeAptRepo, addDebToPool, getAptPackageKey, regenerateAptMetadata } from './utils/apt';
+import { initializeAptRepo, getAptPackageKey, regenerateAptMetadata } from './utils/apt';
 import { PendingLinuxRepos } from './utils/linux-packages';
 import { initializeYumRepo, addRpmToPool, getYumPackageKey, regenerateYumMetadata } from './utils/yum';
 import { updateDarwinReleasesFiles } from './utils/darwin';
+import { runPQ } from './utils/p-queue';
 import { updateWin32ReleasesFiles } from './utils/win32';
 
 const VALID_WINDOWS_SUFFIX = ['-full.nupkg', '-delta.nupkg', '.exe', '.msi'];
@@ -18,6 +19,9 @@ const KEY_LENGTH = 32;
 const SCRYPT_SALT = process.env.NUCLEUS_SCRYPT_SALT || 'nucleus-temp-file';
 
 const d = debug('nucleus:positioner');
+
+// These are store-side copies, so the cap is about requests in flight rather than transfer
+const LATEST_INSTALLER_CONCURRENCY = 6;
 
 type PositionerLock = string;
 
@@ -223,6 +227,26 @@ export default class Positioner {
     }
   }
 
+  /**
+   * Publishes a file handleUpload has already written to the index, at the key clients fetch it
+   * from.  The store copies it rather than being handed the bytes a second time: a release moves
+   * a few hundred megabytes per artifact and this keeps that inside the store.
+   */
+  private async publishIndexedFile(
+    { app, channel, internalVersion, file, fileData }: HandlePlatformUploadOpts,
+    key: string,
+    overwrite = false,
+  ) {
+    if (process.env.NO_NUCLEUS_INDEX) {
+      return await this.store.putFile(key, fileData, overwrite);
+    }
+    return await this.store.copyFile(
+      this.getIndexKey(app, channel, internalVersion, file),
+      key,
+      overwrite,
+    );
+  }
+
   public getIndexKey(app: NucleusApp, channel: NucleusChannel, version: NucleusVersion, file: NucleusFile) {
     return path.posix.join(app.slug, channel.id!, '_index', version.name, file.platform, file.arch, file.fileName);
   }
@@ -262,16 +286,23 @@ export default class Positioner {
       }
     }
 
-    for (const latestKey in latestThings) {
-      const latestThing = latestThings[latestKey];
-      await this.copyFile(latestThing.indexKey, latestKey, latestThing.version);
-    }
+    // Each one writes its own key, and they are store-side copies rather than transfers, so the
+    // bound is only about how many requests to have in flight
+    await runPQ(
+      Object.keys(latestThings),
+      async (latestKey) => await this.publishLatestInstaller(
+        latestThings[latestKey].indexKey,
+        latestKey,
+        latestThings[latestKey].version,
+      ),
+      LATEST_INSTALLER_CONCURRENCY,
+    );
   }
 
   /**
    * It is assumed the called has a validated lock
    */
-  private async copyFile(fromKey: string, toKey: string, ref = '') {
+  private async publishLatestInstaller(fromKey: string, toKey: string, ref = '') {
     const refKey = `${toKey}.ref`;
     if (!ref || (await this.store.getFile(refKey)).toString() !== ref) {
       // The stores report a missing object as an empty buffer, so a version
@@ -285,11 +316,7 @@ export default class Positioner {
         }));
         return;
       }
-      await this.store.putFile(
-        toKey,
-        await this.store.getFile(fromKey),
-        true,
-      );
+      await this.store.copyFile(fromKey, toKey, true);
       await this.store.putFile(
         refKey,
         Buffer.from(ref),
@@ -311,12 +338,8 @@ export default class Positioner {
     });
   }
 
-  protected async handleWindowsUpload({
-    app,
-    channel,
-    file,
-    fileData,
-  }: HandlePlatformUploadOpts) {
+  protected async handleWindowsUpload(opts: HandlePlatformUploadOpts) {
+    const { app, channel, file } = opts;
     const root = path.posix.join(app.slug, channel.id!, 'win32', file.arch);
     const key = path.posix.join(root, file.fileName);
     if (!VALID_WINDOWS_SUFFIX.some(suffix => file.fileName.endsWith(suffix))) {
@@ -324,7 +347,7 @@ export default class Positioner {
       return;
     }
 
-    if (await this.store.putFile(key, fileData) && file.fileName.endsWith('.nupkg')) {
+    if (await this.publishIndexedFile(opts, key) && file.fileName.endsWith('.nupkg')) {
       d('Pushed a nupkg file to the file store so appending release information to RELEASES');
       let cachedFileSizes = new Map<string, number>();
       await updateWin32ReleasesFiles({ app, channel, arch: file.arch, store: this.store, positioner: this, cachedFileSizes });
@@ -341,13 +364,8 @@ export default class Positioner {
     });
   }
 
-  protected async handleDarwinUpload({
-    app,
-    channel,
-    internalVersion,
-    file,
-    fileData,
-  }: HandlePlatformUploadOpts) {
+  protected async handleDarwinUpload(opts: HandlePlatformUploadOpts) {
+    const { app, channel, file } = opts;
     const root = path.posix.join(app.slug, channel.id!, 'darwin', file.arch);
     const fileKey = path.posix.join(root, file.fileName);
     if (!VALID_DARWIN_SUFFIX.some(suffix => file.fileName.endsWith(suffix))) {
@@ -355,7 +373,7 @@ export default class Positioner {
       return;
     }
 
-    if (await this.store.putFile(fileKey, fileData) && file.fileName.endsWith('.zip')) {
+    if (await this.publishIndexedFile(opts, fileKey) && file.fileName.endsWith('.zip')) {
       d('Pushed a zip file to the file store so updating release information in RELEASES.json');
       await updateDarwinReleasesFiles({ app, channel, arch: file.arch, store: this.store });
     }
@@ -370,11 +388,17 @@ export default class Positioner {
   }: HandlePlatformUploadOpts) {
     if (file.fileName.endsWith('.rpm')) {
       d('Adding rpm file to the yum package pool');
+      // Uploaded rather than copied from the index: signing rewrites the rpm, so what the pool
+      // holds is not what was positioned
       await addRpmToPool(this.store, { app, channel, file, fileData, internalVersion });
       this.pendingLinuxRepos.yum = true;
     } else if (file.fileName.endsWith('.deb')) {
       d('Adding deb file to the apt package pool');
-      await addDebToPool(this.store, { app, channel, file, fileData, internalVersion });
+      await this.publishIndexedFile(
+        { app, channel, file, fileData, internalVersion },
+        getAptPackageKey(app, channel, internalVersion.name, file.fileName),
+        true,
+      );
       this.pendingLinuxRepos.apt = true;
     } else {
       console.warn('Will not upload unknown linux file');

@@ -78,6 +78,45 @@ export default class DualWriteStore implements IFileStore {
     return rewriteManifestBaseUrl(data, primaryBaseUrl, secondaryBaseUrl);
   }
 
+  public async copyFile(fromKey: string, toKey: string, overwriteExisting = false) {
+    const wrote = await this.primary.copyFile(fromKey, toKey, overwriteExisting);
+    if (wrote) {
+      d(`Mirroring copy of '${fromKey}' to '${toKey}' on the secondary store`);
+      await this.mirrorCopy(fromKey, toKey);
+    } else if (!await this.secondary.hasFile(toKey)) {
+      const primaryData = await this.primary.getFile(toKey);
+      if (primaryData.length > 0) {
+        console.log(JSON.stringify({
+          message: 'Healing object missing from the secondary store',
+          key: toKey,
+        }));
+        await this.mirrorWrite(toKey, primaryData);
+      }
+    }
+    return wrote;
+  }
+
+  /**
+   * A copy on the secondary only works if the secondary already holds the source, which a mirror
+   * that has drifted may not, so a copy that will not go through falls back to sending the bytes
+   * the primary now has rather than reporting drift over something recoverable.
+   */
+  private async mirrorCopy(fromKey: string, toKey: string) {
+    for (let attempt = 1; attempt <= this.mirrorWriteAttempts; attempt += 1) {
+      try {
+        await this.secondary.copyFile(fromKey, toKey, true);
+        return;
+      } catch (err) {
+        if (attempt < this.mirrorWriteAttempts) {
+          await sleep(this.mirrorRetryDelayMs * attempt);
+          continue;
+        }
+        d(`Copy on the secondary store failed, mirroring the primary's bytes for '${toKey}' instead`);
+      }
+    }
+    await this.mirrorWrite(toKey, await this.primary.getFile(toKey));
+  }
+
   private async mirrorWrite(key: string, data: Buffer) {
     for (let attempt = 1; attempt <= this.mirrorWriteAttempts; attempt += 1) {
       try {

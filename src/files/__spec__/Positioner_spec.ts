@@ -59,6 +59,7 @@ v2.currentRelease = '0.0.3';
 
 describe('Positioner', () => {
   let fakeStore: {
+    copyFile: SinonStub;
     getFile: SinonStub;
     putFile: SinonStub;
     getPublicBaseUrl: SinonStub;
@@ -81,6 +82,7 @@ describe('Positioner', () => {
 
   beforeEach(async () => {
     fakeStore = {
+      copyFile: promiseStub().returns(true),
       getFile: promiseStub().returns(Buffer.from('')),
       getPublicBaseUrl: promiseStub(),
       putFile: promiseStub(),
@@ -195,17 +197,35 @@ describe('Positioner', () => {
               } as any],
             }),
           );
+          // Asserted as sets rather than in order: these run concurrently
+          assert.deepStrictEqual(
+            fakeStore.copyFile.getCalls().map(call => call.args).sort(),
+            [
+              [
+                'fake_slug/fake_channel_id/_index/0.0.2/darwin/x64/test.dmg',
+                'fake_slug/fake_channel_id/latest/darwin/x64/Fake Slug.dmg',
+                true,
+              ],
+              [
+                'fake_slug/fake_channel_id/_index/0.0.2/win32/x64/test.exe',
+                'fake_slug/fake_channel_id/latest/win32/x64/Fake Slug.exe',
+                true,
+              ],
+            ].sort(),
+          );
+          // Only the refs are written; the installers themselves never leave the store
+          assert.deepStrictEqual(
+            fakeStore.putFile.getCalls().map(call => [call.args[0], call.args[1].toString()]).sort(),
+            [
+              ['fake_slug/fake_channel_id/latest/darwin/x64/Fake Slug.dmg.ref', '0.0.2'],
+              ['fake_slug/fake_channel_id/latest/win32/x64/Fake Slug.exe.ref', '0.0.2'],
+            ].sort(),
+          );
           assert.strictEqual(
             fakeStore.getFile.getCalls().filter(call => !call.args[0].endsWith('.lock')).length,
-            4,
+            2,
+            'should read the two refs and nothing else',
           );
-          assert.strictEqual(fakeStore.putFile.callCount, 4);
-          assert.strictEqual(fakeStore.putFile.getCall(0).args[0], 'fake_slug/fake_channel_id/latest/win32/x64/Fake Slug.exe');
-          assert.strictEqual(fakeStore.putFile.getCall(1).args[0], 'fake_slug/fake_channel_id/latest/win32/x64/Fake Slug.exe.ref');
-          assert.strictEqual(fakeStore.putFile.getCall(1).args[1].toString(), '0.0.2');
-          assert.strictEqual(fakeStore.putFile.getCall(2).args[0], 'fake_slug/fake_channel_id/latest/darwin/x64/Fake Slug.dmg');
-          assert.strictEqual(fakeStore.putFile.getCall(3).args[0], 'fake_slug/fake_channel_id/latest/darwin/x64/Fake Slug.dmg.ref');
-          assert.strictEqual(fakeStore.putFile.getCall(3).args[1].toString(), '0.0.2');
         });
 
         it('should not publish a latest installer whose indexed file is missing', async () => {
@@ -227,6 +247,7 @@ describe('Positioner', () => {
             }),
           );
           assert.strictEqual(fakeStore.putFile.callCount, 0);
+          assert.strictEqual(fakeStore.copyFile.callCount, 0);
         });
       });
 
@@ -394,7 +415,7 @@ describe('Positioner', () => {
           'fake_slug/fake_channel_id/win32/ia32/thing-full.nupkg',
         );
         assert.strictEqual(fakeStore.putFile.firstCall.args[1], fakeBuffer);
-        assert.strictEqual(fakeStore.putFile.firstCall.args[2], undefined, 'should not override existing release');
+        assert.ok(!fakeStore.putFile.firstCall.args[2], 'should not override existing release');
       });
 
       it('should update the RELEASES file with correct hash and filename for all nupkg uploads', async () => {
@@ -815,6 +836,85 @@ describe('Positioner', () => {
       assert.strictEqual(fakeStore.deletePath.callCount, 0);
       assert.strictEqual(regenerateAptRepo.callCount, 0);
       assert.strictEqual(regenerateYumRepo.callCount, 0);
+    });
+  });
+
+  // The rest of this file runs with NO_NUCLEUS_INDEX set, which takes the fallback that uploads the
+  // bytes a second time.  Publishing a release goes the other way: the index copy is the source
+  describe('publishing from the index', () => {
+    const position = async (fileName: string, platform: NucleusPlatform, arch = 'x64') => {
+      await positioner.handleUpload(lock, {
+        app: fakeApp,
+        channel: fakeChannel,
+        internalVersion: { name: '0.0.2', rollout: 100 } as any,
+        file: { ...generateSHAs(Buffer.from('')), arch, platform, fileName, type: 'installer' },
+        fileData: Buffer.from('the installer'),
+      });
+    };
+
+    beforeEach(() => {
+      delete process.env.NO_NUCLEUS_INDEX;
+      fakeStore.getFile.callsFake(async (key: string) =>
+        key.endsWith('.lock') ? Buffer.from(lock) : Buffer.from(''));
+    });
+
+    afterEach(() => {
+      process.env.NO_NUCLEUS_INDEX = 'true';
+    });
+
+    it('should copy a darwin artifact into place rather than uploading it again', async () => {
+      await position('thing.dmg', 'darwin');
+
+      assert.deepStrictEqual(fakeStore.copyFile.getCalls().map(call => call.args), [[
+        'fake_slug/fake_channel_id/_index/0.0.2/darwin/x64/thing.dmg',
+        'fake_slug/fake_channel_id/darwin/x64/thing.dmg',
+        false,
+      ]]);
+      assert.deepStrictEqual(
+        fakeStore.putFile.getCalls().map(call => call.args[0]),
+        ['fake_slug/fake_channel_id/_index/0.0.2/darwin/x64/thing.dmg'],
+      );
+    });
+
+    it('should copy a win32 artifact into place rather than uploading it again', async () => {
+      await position('thing.exe', 'win32');
+
+      assert.deepStrictEqual(fakeStore.copyFile.getCalls().map(call => call.args), [[
+        'fake_slug/fake_channel_id/_index/0.0.2/win32/x64/thing.exe',
+        'fake_slug/fake_channel_id/win32/x64/thing.exe',
+        false,
+      ]]);
+    });
+
+    // The pool holds the same bytes as the index for debs, unlike rpms, which signing rewrites
+    it('should copy a deb into the apt pool, overwriting what is there', async () => {
+      await position('thing.deb', 'linux');
+
+      assert.deepStrictEqual(fakeStore.copyFile.getCalls().map(call => call.args), [[
+        'fake_slug/fake_channel_id/_index/0.0.2/linux/x64/thing.deb',
+        'fake_slug/fake_channel_id/linux/debian/binary/0.0.2-thing.deb',
+        true,
+      ]]);
+    });
+
+    it('should rewrite RELEASES only when the copy actually published something', async () => {
+      fakeStore.copyFile.returns(Promise.resolve(false));
+
+      await position('thing-full.nupkg', 'win32');
+
+      assert.strictEqual(fakeStore.copyFile.callCount, 1);
+      assert.strictEqual(
+        fakeStore.putFile.getCalls().filter(call => call.args[0].endsWith('RELEASES')).length,
+        0,
+      );
+    });
+
+    it('should rewrite RELEASES when the copy published a nupkg', async () => {
+      await position('thing-full.nupkg', 'win32');
+
+      assert.ok(
+        fakeStore.putFile.getCalls().filter(call => call.args[0].endsWith('RELEASES')).length > 0,
+      );
     });
   });
 
