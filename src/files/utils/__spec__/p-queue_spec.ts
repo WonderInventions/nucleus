@@ -51,6 +51,22 @@ describe('runPQ', () => {
     assert.fail('should have thrown an error');
   });
 
+  // The caller reads the rejection as "nothing of mine is still running", so a task that was
+  // already under way has to be finished with before the error comes back
+  it('should let the tasks already running finish before it rejects', async () => {
+    const finished: number[] = [];
+    const executor = async (n: number) => {
+      if (n === 0) throw 'bad';
+      await new Promise(r => setTimeout(r, 20));
+      finished.push(n);
+      return n;
+    };
+
+    await assert.rejects(runPQ([0, 1, 2, 3], executor, 2), (err: any) => err === 'bad');
+
+    assert.deepStrictEqual(finished, [1], 'the running task should have finished and no new one started');
+  });
+
   it('should never have more than simultaneous things running', async () => {
     let running = 0;
     await runPQ((Array(1000)).fill(0), async () => {

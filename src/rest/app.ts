@@ -380,8 +380,8 @@ router.post('/:id/channel/:channelId/temporary_releases/release_all', requireLog
     const upToDateChannel = (await driver.getChannel(req.targetApp, param(req.params.channelId)))!;
     const storedVersion = upToDateChannel.versions.find(v => v.name === version);
 
-    // Workers must never reject: runPQ abandons its in-flight tasks on the
-    // first rejection, which would strand the remaining groups
+    // Workers must never reject: runPQ hands out no further work once one does,
+    // which would strand the groups it has not started yet
     const releaseGroup = async (group: ITemporarySave[]) => {
       for (const save of group) {
         const storedFileNames = storedFileNamesBySave.get(save.id)!;

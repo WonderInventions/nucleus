@@ -8,6 +8,8 @@ export const runPQ = async <T, R>(items: T[], executor: (item: T) => R, simultan
   const returns: R[] = [];
   let currentIndex = 0;
   let currentlyRunning = 0;
+  // Wrapped so a task that throws something falsy still counts as a failure
+  let failure: { err: any } | null = null;
 
   let done: (err?: any) => void;
   let isDone = false;
@@ -22,10 +24,14 @@ export const runPQ = async <T, R>(items: T[], executor: (item: T) => R, simultan
   const run = async () => {
     if (isDone) return;
     currentlyRunning += 1;
-    if (currentIndex >= items.length) {
+    // A failure stops any further item being handed out, but the batch is not settled until the
+    // tasks already running have finished.  Callers read the rejection as "nothing of mine is
+    // still in flight", and for a release that is what decides when the channel lock can go:
+    // returning while a task is still running lets it write over whatever publishes next.
+    if (failure || currentIndex >= items.length) {
       currentlyRunning -= 1;
       if (currentlyRunning === 0) {
-        done();
+        done(failure ? failure.err : undefined);
       }
       return;
     }
@@ -35,7 +41,7 @@ export const runPQ = async <T, R>(items: T[], executor: (item: T) => R, simultan
     try {
       returns[i] = await executor(items[i]);
     } catch (err) {
-      return done(err);
+      failure = failure || { err };
     }
     currentlyRunning -= 1;
 
