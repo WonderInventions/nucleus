@@ -109,10 +109,13 @@ export default class S3Store implements IFileStore {
       }));
       return response.ContentLength || 0;
     } catch (err: any) {
+      // Callers read a zero as "not in the store yet" and carry on without it, so only a missing
+      // key may answer with one.  A throttled or failed HEAD answering the same way is how the
+      // linux repos would come to publish metadata with a package silently left out
       if (err.name === 'NotFound' || err.$metadata?.httpStatusCode === 404) {
         return 0;
       }
-      return 0;
+      throw err;
     }
   }
 

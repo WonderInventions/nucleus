@@ -3,7 +3,7 @@ import * as fs from 'fs/promises';
 import * as path from 'path';
 
 import { gpgSign, gpgSignInline } from './gpg';
-import { packagesForLinuxRepo } from './linux-packages';
+import { packagesForLinuxRepo, readPackageFromPool } from './linux-packages';
 import { syncFilesToStore } from './sync';
 import { withTmpDir } from './tmp';
 import * as config from '../../config';
@@ -121,13 +121,9 @@ const stageAdvertisedDebs = async (
   tmpDir: string,
 ) => {
   for (const pkg of packagesForLinuxRepo(channel, '.deb')) {
-    const packageKey = getAptPackageKey(app, channel, pkg.versionName, pkg.fileName);
-    // A file can be registered against the version before its package
-    // reaches the store, and the store reports the missing key as an
-    // empty buffer, which dpkg-scanpackages rejects
-    if (await store.getFileSize(packageKey)) {
-      await fs.writeFile(`${tmpDir}/binary/${pkg.versionName}-${pkg.fileName}`, await store.getFile(packageKey));
-    }
+    const data = await readPackageFromPool(store, getAptPackageKey(app, channel, pkg.versionName, pkg.fileName));
+    if (!data) continue;
+    await fs.writeFile(`${tmpDir}/binary/${pkg.versionName}-${pkg.fileName}`, data);
   }
 };
 

@@ -3,7 +3,7 @@ import * as fs from 'fs/promises';
 import * as path from 'path';
 import debug from 'debug';
 
-import { packagesForLinuxRepo } from './linux-packages';
+import { packagesForLinuxRepo, readPackageFromPool } from './linux-packages';
 import { spawnPromiseAndCapture, escapeShellArguments } from './spawn';
 import { syncDirectoryToStore } from './sync';
 import { withTmpDir } from './tmp';
@@ -116,12 +116,9 @@ const stageAdvertisedRpms = async (
   tmpDir: string,
 ) => {
   for (const pkg of packagesForLinuxRepo(channel, '.rpm')) {
-    const packageKey = getYumPackageKey(app, channel, pkg.versionName, pkg.fileName);
-    // A file can be registered against the version before its package reaches the store, and the
-    // store reports the missing key as an empty buffer, which createrepo rejects
-    if (await store.getFileSize(packageKey)) {
-      await fs.writeFile(path.resolve(tmpDir, `${pkg.versionName}-${pkg.fileName}`), await store.getFile(packageKey));
-    }
+    const data = await readPackageFromPool(store, getYumPackageKey(app, channel, pkg.versionName, pkg.fileName));
+    if (!data) continue;
+    await fs.writeFile(path.resolve(tmpDir, `${pkg.versionName}-${pkg.fileName}`), data);
   }
 };
 

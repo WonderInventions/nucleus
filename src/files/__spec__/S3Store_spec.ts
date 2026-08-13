@@ -105,6 +105,18 @@ describe('S3Store', () => {
       s3Mock.on(HeadObjectCommand).rejects({ name: 'NotFound' });
       assert.strictEqual(await store.getFileSize('myKey'), 0);
     });
+
+    it('should return 0 for a 404 that does not name itself NotFound', async () => {
+      s3Mock.on(HeadObjectCommand).rejects({ name: 'SomethingElse', $metadata: { httpStatusCode: 404 } });
+      assert.strictEqual(await store.getFileSize('myKey'), 0);
+    });
+
+    // Callers read a zero as "not there yet" and carry on without the file, so a failed check must
+    // not answer with one
+    it('should throw when the size cannot be read', async () => {
+      s3Mock.on(HeadObjectCommand).rejects({ name: 'InternalError', $metadata: { httpStatusCode: 500 } });
+      await assert.rejects(store.getFileSize('myKey'), { name: 'InternalError' });
+    });
   });
 
   describe('putFile', () => {
