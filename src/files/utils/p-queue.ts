@@ -2,6 +2,9 @@ export const runPQ = async <T, R>(items: T[], executor: (item: T) => R, simultan
   if (simultaneous <= 0) {
     throw new Error('Simultaneous value must be greater than 0');
   }
+  // Nothing to run means nothing ever reaches the completion check below, which would otherwise
+  // leave the caller waiting on a promise that can never settle
+  if (items.length === 0) return [];
   const returns: R[] = [];
   let currentIndex = 0;
   let currentlyRunning = 0;

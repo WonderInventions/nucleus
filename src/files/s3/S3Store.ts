@@ -1,6 +1,7 @@
 import {
   S3Client,
   HeadObjectCommand,
+  CopyObjectCommand,
   PutObjectCommand,
   GetObjectCommand,
   DeleteObjectsCommand,
@@ -70,6 +71,12 @@ export const buildS3ClientOptions = (s3Config: S3Options): NonNullable<Construct
   return options;
 };
 
+// CopySource is one string carrying both bucket and key, and the SDK sends it as given, so the
+// key has to be escaped here.  Roam ships installers with a space in the name ("Roam Setup.exe")
+// and every latest/ key is "<app name>.<ext>", so an unescaped source is not a corner case
+const encodeCopySource = (bucket: string, key: string) =>
+  `${bucket}/${key}`.split('/').map(encodeURIComponent).join('/');
+
 export default class S3Store implements IFileStore {
   private s3Client: S3Client | null = null;
 
@@ -134,6 +141,25 @@ export default class S3Store implements IFileStore {
     }
     if (overwrite) {
       CloudFrontBatchInvalidator.get(this).addToBatch(key);
+    }
+    return wrote;
+  }
+
+  public async copyFile(fromKey: string, toKey: string, overwrite = false) {
+    d(`Copying file: '${fromKey}' to '${toKey}', overwrite=${overwrite ? 'true' : 'false'}`);
+    const s3 = this.getS3();
+    let wrote = false;
+    if (overwrite || !await this.hasFile(toKey)) {
+      d(`Deciding to write file (either because overwrite is enabled or the key didn't exist)`);
+      await s3.send(new CopyObjectCommand({
+        Bucket: this.s3Config.bucketName,
+        Key: toKey,
+        CopySource: encodeCopySource(this.s3Config.bucketName, fromKey),
+      }));
+      wrote = true;
+    }
+    if (overwrite) {
+      CloudFrontBatchInvalidator.get(this).addToBatch(toKey);
     }
     return wrote;
   }

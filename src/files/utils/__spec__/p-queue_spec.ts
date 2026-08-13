@@ -19,6 +19,11 @@ describe('runPQ', () => {
     assert.deepStrictEqual(result, [0.2, 1, 2, 3, 4, 5, 6]);
   });
 
+  // Nothing starts, so nothing can reach the check that resolves the caller's promise
+  it('should settle rather than hang when given no items', async () => {
+    assert.deepStrictEqual(await runPQ([], async (item: number) => item * 2), []);
+  });
+
   it('should throw an error when simultaneous is set to 0', async () => {
     try {
       await runPQ([1, 2, 3], async n => n + 1, 0);

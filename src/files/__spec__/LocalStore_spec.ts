@@ -100,6 +100,38 @@ describe('LocalStore', () => {
     });
   });
 
+  describe('copyFile', () => {
+    it('should copy the bytes to the new key', async () => {
+      await store.putFile('from.txt', Buffer.from('installer bytes'));
+
+      assert.strictEqual(await store.copyFile('from.txt', 'subdir/nested/to.txt'), true);
+      assert.deepStrictEqual(
+        await fs.readFile(path.join(tmpDir, 'subdir/nested/to.txt')),
+        Buffer.from('installer bytes'),
+      );
+    });
+
+    it('should not overwrite an existing key by default', async () => {
+      await store.putFile('from.txt', Buffer.from('new'));
+      await store.putFile('to.txt', Buffer.from('original'));
+
+      assert.strictEqual(await store.copyFile('from.txt', 'to.txt'), false);
+      assert.deepStrictEqual(await fs.readFile(path.join(tmpDir, 'to.txt')), Buffer.from('original'));
+    });
+
+    it('should overwrite when overwrite = true', async () => {
+      await store.putFile('from.txt', Buffer.from('new'));
+      await store.putFile('to.txt', Buffer.from('original'));
+
+      assert.strictEqual(await store.copyFile('from.txt', 'to.txt', true), true);
+      assert.deepStrictEqual(await fs.readFile(path.join(tmpDir, 'to.txt')), Buffer.from('new'));
+    });
+
+    it('should reject a copy of a key it does not hold', async () => {
+      await assert.rejects(store.copyFile('missing.txt', 'to.txt'));
+    });
+  });
+
   describe('getFile', () => {
     it('should return empty buffer for non-existent files', async () => {
       const result = await store.getFile('nonexistent.txt');

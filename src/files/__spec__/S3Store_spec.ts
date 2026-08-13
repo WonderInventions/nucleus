@@ -1,9 +1,11 @@
 import { describe, it, beforeEach, afterEach } from 'node:test';
 import * as assert from 'node:assert/strict';
 import { mockClient } from 'aws-sdk-client-mock';
+import { stub } from 'sinon';
 import {
   S3Client,
   HeadObjectCommand,
+  CopyObjectCommand,
   PutObjectCommand,
   GetObjectCommand,
   ListObjectsV2Command,
@@ -13,6 +15,7 @@ import { CloudFrontClient } from '@aws-sdk/client-cloudfront';
 import { sdkStreamMixin } from '@smithy/util-stream';
 import { Readable } from 'stream';
 
+import { CloudFrontBatchInvalidator } from '../s3/CloudFrontBatchInvalidator';
 import S3Store, {
   buildS3ClientOptions,
   S3_CONNECTION_TIMEOUT_MS,
@@ -159,6 +162,91 @@ describe('S3Store', () => {
       assert.strictEqual(await store.putFile('myKey', Buffer.from('value'), true), true);
 
       assert.strictEqual(cfMock.calls().length, 0);
+    });
+  });
+
+  describe('copyFile', () => {
+    it('should copy inside the store rather than moving the bytes', async () => {
+      s3Mock.on(HeadObjectCommand).rejects({ name: 'NotFound' });
+      s3Mock.on(CopyObjectCommand).resolves({});
+
+      assert.strictEqual(await store.copyFile('from/key', 'to/key'), true);
+
+      const calls = s3Mock.commandCalls(CopyObjectCommand);
+      assert.strictEqual(calls.length, 1);
+      assert.strictEqual(calls[0].args[0].input.Bucket, 'myBucket');
+      assert.strictEqual(calls[0].args[0].input.Key, 'to/key');
+      assert.strictEqual(calls[0].args[0].input.CopySource, 'myBucket/from/key');
+      assert.strictEqual(s3Mock.commandCalls(GetObjectCommand).length, 0);
+      assert.strictEqual(s3Mock.commandCalls(PutObjectCommand).length, 0);
+    });
+
+    // Every latest/ key is "<app name>.<ext>", and Roam's own installer is "Roam Setup.exe"
+    it('should escape a source key the way CopySource needs, without escaping the separators', async () => {
+      s3Mock.on(HeadObjectCommand).rejects({ name: 'NotFound' });
+      s3Mock.on(CopyObjectCommand).resolves({});
+
+      await store.copyFile('app/chan/_index/1.0.0/win32/x64/Roam Setup.exe', 'to/key');
+
+      assert.strictEqual(
+        s3Mock.commandCalls(CopyObjectCommand)[0].args[0].input.CopySource,
+        'myBucket/app/chan/_index/1.0.0/win32/x64/Roam%20Setup.exe',
+      );
+    });
+
+    it('should not overwrite files by default', async () => {
+      s3Mock.on(HeadObjectCommand).resolves({});
+      s3Mock.on(CopyObjectCommand).resolves({});
+
+      assert.strictEqual(await store.copyFile('from/key', 'to/key'), false);
+
+      assert.strictEqual(s3Mock.commandCalls(CopyObjectCommand).length, 0);
+    });
+
+    it('should overwrite files when overwrite = true', async () => {
+      s3Mock.on(HeadObjectCommand).resolves({});
+      s3Mock.on(CopyObjectCommand).resolves({});
+
+      assert.strictEqual(await store.copyFile('from/key', 'to/key', true), true);
+
+      assert.strictEqual(s3Mock.commandCalls(CopyObjectCommand).length, 1);
+    });
+
+    // A copy replaces whatever the CDN is already serving at that key, exactly as a put does.
+    // The invalidator is stubbed rather than built: constructing a real one starts a repeating
+    // timer that outlives the test run
+    it('should invalidate the destination when it overwrites', async () => {
+      s3Mock.on(HeadObjectCommand).resolves({});
+      s3Mock.on(CopyObjectCommand).resolves({});
+      const addToBatch = stub();
+      const get = stub(CloudFrontBatchInvalidator, 'get').returns({ addToBatch } as any);
+
+      try {
+        await store.copyFile('from/key', 'to/key', true);
+        assert.deepStrictEqual(addToBatch.getCalls().map(c => c.args[0]), ['to/key']);
+      } finally {
+        get.restore();
+      }
+    });
+
+    it('should not invalidate anything when it leaves an existing key alone', async () => {
+      s3Mock.on(HeadObjectCommand).resolves({});
+      const addToBatch = stub();
+      const get = stub(CloudFrontBatchInvalidator, 'get').returns({ addToBatch } as any);
+
+      try {
+        assert.strictEqual(await store.copyFile('from/key', 'to/key'), false);
+        assert.strictEqual(addToBatch.callCount, 0);
+      } finally {
+        get.restore();
+      }
+    });
+
+    it('should propagate a failed copy rather than reporting success', async () => {
+      s3Mock.on(HeadObjectCommand).rejects({ name: 'NotFound' });
+      s3Mock.on(CopyObjectCommand).rejects(new Error('copy exploded'));
+
+      await assert.rejects(store.copyFile('from/key', 'to/key'), /copy exploded/);
     });
   });
 

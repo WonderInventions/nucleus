@@ -375,7 +375,6 @@ router.post('/:id/channel/:channelId/temporary_releases/release_all', requireLog
         results.push({ saveId: save.id, platform: save.platform, arch: save.arch, success: false, error: `${err}` });
       }
     }
-    // Also guards runPQ, which never resolves when handed an empty list
     if (registeredSaves.length === 0) return;
 
     const upToDateChannel = (await driver.getChannel(req.targetApp, param(req.params.channelId)))!;
