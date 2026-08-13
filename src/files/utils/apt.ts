@@ -20,15 +20,6 @@ const APT_METADATA_FILES = [
   'binary/InRelease',
 ];
 
-const pathExists = async (p: string): Promise<boolean> => {
-  try {
-    await fs.access(p);
-    return true;
-  } catch {
-    return false;
-  }
-};
-
 const getScanPackagesCommand = (dir: string, args: string[]): [string, string[]] => {
   if (process.platform === 'linux') {
     return ['dpkg-scanpackages', args];
@@ -110,17 +101,26 @@ export const getAptPackageKey = (app: NucleusApp, channel: NucleusChannel, versi
   path.posix.join(app.slug, channel.id!, 'linux', 'debian', 'binary', `${versionName}-${fileName}`);
 
 /**
- * Stages the packages the repo advertises, minus one the caller is about to write itself.
+ * Adds a deb to the pool the repo metadata is built from.  Advertising it is a separate step, so
+ * that a release positions every package before any of them reaches the published metadata.
  */
+export const addDebToPool = async (store: IFileStore, {
+  app,
+  channel,
+  internalVersion,
+  file,
+  fileData,
+}: HandlePlatformUploadOpts) => {
+  await store.putFile(getAptPackageKey(app, channel, internalVersion.name, file.fileName), fileData, true);
+};
+
 const stageAdvertisedDebs = async (
   store: IFileStore,
   app: NucleusApp,
   channel: NucleusChannel,
   tmpDir: string,
-  exclude?: { versionName: string; fileName: string },
 ) => {
   for (const pkg of packagesForLinuxRepo(channel, '.deb')) {
-    if (exclude && pkg.versionName === exclude.versionName && pkg.fileName === exclude.fileName) continue;
     const packageKey = getAptPackageKey(app, channel, pkg.versionName, pkg.fileName);
     // A file can be registered against the version before its package
     // reaches the store, and the store reports the missing key as an
@@ -161,32 +161,3 @@ export const initializeAptRepo = async (store: IFileStore, app: NucleusApp, chan
   });
 };
 
-export const addFileToAptRepo = async (store: IFileStore, {
-  app,
-  channel,
-  internalVersion,
-  file,
-  fileData,
-}: HandlePlatformUploadOpts) => {
-  await withTmpDir(async (tmpDir) => {
-    const storeKey = path.posix.join(app.slug, channel.id!, 'linux', 'debian');
-    await fs.mkdir(path.resolve(tmpDir, 'binary'), { recursive: true });
-
-    await stageAdvertisedDebs(store, app, channel, tmpDir, {
-      versionName: internalVersion.name,
-      fileName: file.fileName,
-    });
-
-    const binaryPath = path.resolve(tmpDir, 'binary', `${internalVersion.name}-${file.fileName}`);
-    if (await pathExists(binaryPath)) {
-      throw new Error('Uploaded a duplicate file');
-    }
-    await fs.writeFile(binaryPath, fileData);
-    await writeAptMetadata(tmpDir, app);
-
-    // Written before the metadata that references it, so a failure in between leaves an
-    // unadvertised package rather than metadata pointing at a key that 404s
-    await store.putFile(getAptPackageKey(app, channel, internalVersion.name, file.fileName), fileData, true);
-    await syncFilesToStore(store, storeKey, tmpDir, APT_METADATA_FILES);
-  });
-};

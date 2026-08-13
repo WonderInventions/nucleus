@@ -306,6 +306,7 @@ router.post('/:id/channel/:channelId/temporary_releases/:temporarySaveId/release
         d('Database inconsistency detected while releasing for file:', file.id);
       }
     }
+    await positioner.regenerateLinuxRepos(lock, req.targetApp, upToDateChannel);
     await positioner.cleanUpTemporaryFile(lock, req.targetApp, channel, save.saveString);
   }))) {
     return res.status(409).json({ error: 'Release already in progress' });
@@ -428,6 +429,8 @@ router.post('/:id/channel/:channelId/temporary_releases/release_all', requireLog
     };
 
     await runPQ(groupSavesForRelease(registeredSaves), releaseGroup, RELEASE_ALL_CONCURRENCY);
+
+    await positioner.regenerateLinuxRepos(lock, req.targetApp, upToDateChannel);
 
     if (results.some(r => r.success)) {
       await positioner.potentiallyUpdateLatestInstallers(

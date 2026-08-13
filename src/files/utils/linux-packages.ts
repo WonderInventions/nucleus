@@ -7,6 +7,12 @@ export interface AdvertisedPackage {
   fileName: string;
 }
 
+/** Linux repos holding packages that have been positioned but are not yet advertised. */
+export interface PendingLinuxRepos {
+  apt: boolean;
+  yum: boolean;
+}
+
 /**
  * The packages a linux repo advertises: every package of the given kind belonging to the
  * semver-greatest non-dead version that carries one.
