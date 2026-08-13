@@ -16,14 +16,20 @@ export const syncDirectoryToStore = async (store: IFileStore, keyPrefix: string,
   }
 };
 
-export const syncStoreToDirectory = async (store: IFileStore, keyPrefix: string, localDir: string) => {
-  for (const key of await store.listFiles(keyPrefix)) {
-    const relativeKey = key.substr(keyPrefix.length + 1);
-    const localPath = path.resolve(localDir, relativeKey);
-    await fs.mkdir(path.dirname(localPath), { recursive: true });
-    await fs.writeFile(
-      localPath,
-      await store.getFile(key),
+/**
+ * Uploads only the named files out of a working directory.
+ *
+ * The linux repo builders stage published packages next to the metadata they generate, because
+ * the indexing tools need the packages on disk to read them.  Those packages came from the store
+ * and are unchanged, so naming the metadata explicitly is what stops a rebuild from uploading
+ * hundreds of megabytes of packages back over themselves.
+ */
+export const syncFilesToStore = async (store: IFileStore, keyPrefix: string, localBaseDir: string, relativePaths: string[]) => {
+  for (const relativePath of relativePaths) {
+    await store.putFile(
+      path.posix.join(keyPrefix, relativePath),
+      await fs.readFile(path.resolve(localBaseDir, relativePath)),
+      true,
     );
   }
 };

@@ -1,12 +1,24 @@
 import * as cp from 'child-process-promise';
 import * as fs from 'fs/promises';
 import * as path from 'path';
-import * as semver from 'semver';
 
 import { gpgSign, gpgSignInline } from './gpg';
-import { syncDirectoryToStore } from './sync';
+import { packagesForLinuxRepo } from './linux-packages';
+import { syncFilesToStore } from './sync';
 import { withTmpDir } from './tmp';
 import * as config from '../../config';
+
+// Everything writeAptMetadata generates.  Named rather than derived because the debs it indexes
+// sit in the same directory and must not be re-uploaded alongside it
+const APT_METADATA_FILES = [
+  'binary/Packages',
+  'binary/Packages.gz',
+  'binary/Sources',
+  'binary/Sources.gz',
+  'binary/Release',
+  'binary/Release.gpg',
+  'binary/InRelease',
+];
 
 const pathExists = async (p: string): Promise<boolean> => {
   try {
@@ -98,38 +110,41 @@ export const getAptPackageKey = (app: NucleusApp, channel: NucleusChannel, versi
   path.posix.join(app.slug, channel.id!, 'linux', 'debian', 'binary', `${versionName}-${fileName}`);
 
 /**
+ * Stages the packages the repo advertises, minus one the caller is about to write itself.
+ */
+const stageAdvertisedDebs = async (
+  store: IFileStore,
+  app: NucleusApp,
+  channel: NucleusChannel,
+  tmpDir: string,
+  exclude?: { versionName: string; fileName: string },
+) => {
+  for (const pkg of packagesForLinuxRepo(channel, '.deb')) {
+    if (exclude && pkg.versionName === exclude.versionName && pkg.fileName === exclude.fileName) continue;
+    const packageKey = getAptPackageKey(app, channel, pkg.versionName, pkg.fileName);
+    // A file can be registered against the version before its package
+    // reaches the store, and the store reports the missing key as an
+    // empty buffer, which dpkg-scanpackages rejects
+    if (await store.getFileSize(packageKey)) {
+      await fs.writeFile(`${tmpDir}/binary/${pkg.versionName}-${pkg.fileName}`, await store.getFile(packageKey));
+    }
+  }
+};
+
+/**
  * Rebuild the apt repo metadata from the packages that should currently be
- * advertised (the latest non-dead version's debs, mirroring addFileToAptRepo)
- * without adding anything.  Used after deleting packages so the metadata never
- * advertises files that no longer exist.
+ * advertised, without adding anything.  Used after deleting packages so the
+ * metadata never advertises files that no longer exist.
  */
 export const regenerateAptMetadata = async (store: IFileStore, app: NucleusApp, channel: NucleusChannel) => {
   await withTmpDir(async (tmpDir) => {
     const storeKey = path.posix.join(app.slug, channel.id!, 'linux', 'debian');
     await fs.mkdir(path.resolve(tmpDir, 'binary'), { recursive: true });
 
-    let latestVersion: NucleusVersion | undefined;
-    let latestVersionFiles: NucleusFile[] = [];
-    for (const version of channel.versions) {
-      if (!version.dead && (!latestVersion || semver.gt(version.name, latestVersion.name))) {
-        const versionFiles = (version.files || []).filter((f) => f.fileName.endsWith(".deb") && f.platform === "linux");
-        if (versionFiles.length) {
-          latestVersion = version;
-          latestVersionFiles = versionFiles;
-        }
-      }
-    }
-    if (latestVersion) {
-      for (const file of latestVersionFiles) {
-        const packageKey = getAptPackageKey(app, channel, latestVersion.name, file.fileName);
-        if (await store.getFileSize(packageKey)) {
-          await fs.writeFile(`${tmpDir}/binary/${latestVersion.name}-${file.fileName}`, await store.getFile(packageKey));
-        }
-      }
-    }
+    await stageAdvertisedDebs(store, app, channel, tmpDir);
 
     await writeAptMetadata(tmpDir, app);
-    await syncDirectoryToStore(store, storeKey, tmpDir);
+    await syncFilesToStore(store, storeKey, tmpDir, APT_METADATA_FILES);
   });
 };
 
@@ -137,10 +152,11 @@ export const initializeAptRepo = async (store: IFileStore, app: NucleusApp, chan
   await withTmpDir(async (tmpDir) => {
     await fs.mkdir(path.resolve(tmpDir, 'binary'), { recursive: true });
     await writeAptMetadata(tmpDir, app);
-    await syncDirectoryToStore(
+    await syncFilesToStore(
       store,
       path.posix.join(app.slug, channel.id!, 'linux', 'debian'),
       tmpDir,
+      APT_METADATA_FILES,
     );
   });
 };
@@ -156,33 +172,10 @@ export const addFileToAptRepo = async (store: IFileStore, {
     const storeKey = path.posix.join(app.slug, channel.id!, 'linux', 'debian');
     await fs.mkdir(path.resolve(tmpDir, 'binary'), { recursive: true });
 
-    // Download any files belonging to the latest version *except* that we want to avoid redownloading
-    // the same file we are adding
-    let latestVersion;
-    let latestVersionFiles: NucleusFile[] = [];
-    for (const version of channel.versions) {
-      if (!version.dead && (!latestVersion || semver.gt(version.name, latestVersion.name))) {
-        const versionFiles = (version.files || []).filter((f) => f.fileName.endsWith(".deb") && f.platform === "linux");
-        if (versionFiles) {
-          latestVersion = version;
-          latestVersionFiles = versionFiles;
-        }
-      }
-    }
-    if (latestVersion && latestVersionFiles.length) {
-      for (const otherFile of latestVersionFiles) {
-        if (otherFile.fileName !== file.fileName || internalVersion.name !== latestVersion.name) {
-          const fname = `${latestVersion.name}-${otherFile.fileName}`;
-          const packageKey = getAptPackageKey(app, channel, latestVersion.name, otherFile.fileName);
-          // A file can be registered against the version before its package
-          // reaches the store, and the store reports the missing key as an
-          // empty buffer, which dpkg-scanpackages rejects
-          if (await store.getFileSize(packageKey)) {
-            await fs.writeFile(`${tmpDir}/binary/${fname}`, await store.getFile(packageKey));
-          }
-        }
-      }
-    }
+    await stageAdvertisedDebs(store, app, channel, tmpDir, {
+      versionName: internalVersion.name,
+      fileName: file.fileName,
+    });
 
     const binaryPath = path.resolve(tmpDir, 'binary', `${internalVersion.name}-${file.fileName}`);
     if (await pathExists(binaryPath)) {
@@ -190,10 +183,10 @@ export const addFileToAptRepo = async (store: IFileStore, {
     }
     await fs.writeFile(binaryPath, fileData);
     await writeAptMetadata(tmpDir, app);
-    await syncDirectoryToStore(
-      store,
-      storeKey,
-      tmpDir,
-    );
+
+    // Written before the metadata that references it, so a failure in between leaves an
+    // unadvertised package rather than metadata pointing at a key that 404s
+    await store.putFile(getAptPackageKey(app, channel, internalVersion.name, file.fileName), fileData, true);
+    await syncFilesToStore(store, storeKey, tmpDir, APT_METADATA_FILES);
   });
 };
