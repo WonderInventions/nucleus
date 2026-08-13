@@ -17,6 +17,59 @@ const d = debug('nucleus:s3');
 // S3 and R2 both reject DeleteObjects requests with more than 1000 keys
 const MAX_DELETE_BATCH = 1000;
 
+export const S3_CONNECTION_TIMEOUT_MS = 10_000;
+
+/**
+ * An *inactivity* timeout on the socket, not a deadline for the whole request, so a multi-hundred
+ * megabyte installer upload keeps resetting it for as long as bytes are moving and is never cut
+ * off part way.  Only a connection that has gone completely silent is abandoned.
+ *
+ * Without one, a stalled connection is bounded by nothing but the kernel's TCP retransmit budget,
+ * which is around a quarter of an hour.  A release publishing every platform at once holds the
+ * caller for the whole of that, and it has already timed out a release client that gave up long
+ * before Nucleus did.
+ */
+export const S3_REQUEST_TIMEOUT_MS = 60_000;
+
+// Aborting a stalled request only helps if the retry is what completes it, and a release is not
+// re-runnable once its drafts are consumed, so this sits above the SDK's default of 3
+export const S3_MAX_ATTEMPTS = 5;
+
+export const buildS3ClientOptions = (s3Config: S3Options): NonNullable<ConstructorParameters<typeof S3Client>[0]> => {
+  // The timeouts are handed over as plain options rather than a constructed NodeHttpHandler so
+  // the SDK keeps owning which handler it builds them into
+  const options: NonNullable<ConstructorParameters<typeof S3Client>[0]> = {
+    maxAttempts: S3_MAX_ATTEMPTS,
+    requestHandler: {
+      connectionTimeout: S3_CONNECTION_TIMEOUT_MS,
+      requestTimeout: S3_REQUEST_TIMEOUT_MS,
+    },
+  };
+
+  if (s3Config.init) {
+    if (s3Config.init.endpoint) {
+      options.endpoint = s3Config.init.endpoint;
+    }
+    if (s3Config.init.s3ForcePathStyle) {
+      options.forcePathStyle = s3Config.init.s3ForcePathStyle;
+    }
+    if (s3Config.init.credentials) {
+      options.credentials = s3Config.init.credentials;
+    }
+    if (s3Config.init.region) {
+      options.region = s3Config.init.region;
+    }
+    if (s3Config.init.requestChecksumCalculation) {
+      options.requestChecksumCalculation = s3Config.init.requestChecksumCalculation;
+    }
+    if (s3Config.init.responseChecksumValidation) {
+      options.responseChecksumValidation = s3Config.init.responseChecksumValidation;
+    }
+  }
+
+  return options;
+};
+
 export default class S3Store implements IFileStore {
   private s3Client: S3Client | null = null;
 
@@ -27,30 +80,7 @@ export default class S3Store implements IFileStore {
       return this.s3Client;
     }
 
-    const options: ConstructorParameters<typeof S3Client>[0] = {};
-
-    if (this.s3Config.init) {
-      if (this.s3Config.init.endpoint) {
-        options.endpoint = this.s3Config.init.endpoint;
-      }
-      if (this.s3Config.init.s3ForcePathStyle) {
-        options.forcePathStyle = this.s3Config.init.s3ForcePathStyle;
-      }
-      if (this.s3Config.init.credentials) {
-        options.credentials = this.s3Config.init.credentials;
-      }
-      if (this.s3Config.init.region) {
-        options.region = this.s3Config.init.region;
-      }
-      if (this.s3Config.init.requestChecksumCalculation) {
-        options.requestChecksumCalculation = this.s3Config.init.requestChecksumCalculation;
-      }
-      if (this.s3Config.init.responseChecksumValidation) {
-        options.responseChecksumValidation = this.s3Config.init.responseChecksumValidation;
-      }
-    }
-
-    this.s3Client = new S3Client(options);
+    this.s3Client = new S3Client(buildS3ClientOptions(this.s3Config));
     return this.s3Client;
   }
 
