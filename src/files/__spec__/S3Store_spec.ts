@@ -13,7 +13,12 @@ import { CloudFrontClient } from '@aws-sdk/client-cloudfront';
 import { sdkStreamMixin } from '@smithy/util-stream';
 import { Readable } from 'stream';
 
-import S3Store from '../s3/S3Store';
+import S3Store, {
+  buildS3ClientOptions,
+  S3_CONNECTION_TIMEOUT_MS,
+  S3_MAX_ATTEMPTS,
+  S3_REQUEST_TIMEOUT_MS,
+} from '../s3/S3Store';
 
 describe('S3Store', () => {
   let store: S3Store;
@@ -257,6 +262,59 @@ describe('S3Store', () => {
       assert.strictEqual(calls[1].args[0].input.Delete?.Objects?.length, 500);
       const deletedKeys = calls.flatMap(call => (call.args[0].input.Delete?.Objects || []).map(o => o.Key));
       assert.deepStrictEqual(deletedKeys, keys.map(k => k.Key));
+    });
+  });
+
+  describe('buildS3ClientOptions', () => {
+    it('should bound how long a silent connection can hang', () => {
+      const options = buildS3ClientOptions(s3Config);
+
+      assert.deepStrictEqual(options.requestHandler, {
+        connectionTimeout: S3_CONNECTION_TIMEOUT_MS,
+        requestTimeout: S3_REQUEST_TIMEOUT_MS,
+      });
+      assert.strictEqual(S3_CONNECTION_TIMEOUT_MS, 10_000);
+      assert.strictEqual(S3_REQUEST_TIMEOUT_MS, 60_000);
+    });
+
+    it('should retry more than the SDK default, since aborting alone does not finish the request', () => {
+      assert.strictEqual(buildS3ClientOptions(s3Config).maxAttempts, S3_MAX_ATTEMPTS);
+      assert.strictEqual(S3_MAX_ATTEMPTS, 5);
+    });
+
+    it('should still pass every init option through to the client', () => {
+      s3Config.init = {
+        endpoint: 'https://example.r2.cloudflarestorage.com',
+        s3ForcePathStyle: true,
+        credentials: { accessKeyId: 'id', secretAccessKey: 'secret' },
+        region: 'auto',
+        requestChecksumCalculation: 'WHEN_REQUIRED',
+        responseChecksumValidation: 'WHEN_REQUIRED',
+      } as S3Options['init'];
+
+      const options = buildS3ClientOptions(s3Config);
+
+      assert.strictEqual(options.endpoint, 'https://example.r2.cloudflarestorage.com');
+      assert.strictEqual(options.forcePathStyle, true);
+      assert.deepStrictEqual(options.credentials, { accessKeyId: 'id', secretAccessKey: 'secret' });
+      assert.strictEqual(options.region, 'auto');
+      assert.strictEqual(options.requestChecksumCalculation, 'WHEN_REQUIRED');
+      assert.strictEqual(options.responseChecksumValidation, 'WHEN_REQUIRED');
+    });
+
+    // Handing the SDK plain options instead of a NodeHttpHandler leaves it free to ignore them
+    // without erroring, and it resolves both the handler config and maxAttempts lazily, so this
+    // reaches through a real client rather than trusting the object we handed it
+    it('should reach a constructed client', async () => {
+      const client = new S3Client(buildS3ClientOptions(s3Config));
+
+      assert.strictEqual(await client.config.maxAttempts(), S3_MAX_ATTEMPTS);
+
+      const handler = client.config.requestHandler as { configProvider?: Promise<Record<string, unknown>> };
+      assert.ok(handler.configProvider, 'expected the request handler to expose its pending config');
+      const handlerConfig = await handler.configProvider;
+      assert.strictEqual(handlerConfig.connectionTimeout, S3_CONNECTION_TIMEOUT_MS);
+      assert.strictEqual(handlerConfig.requestTimeout, S3_REQUEST_TIMEOUT_MS);
     });
   });
 });
