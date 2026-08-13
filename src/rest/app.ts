@@ -297,15 +297,16 @@ router.post('/:id/channel/:channelId/temporary_releases/:temporarySaveId/release
           internalVersion: storedVersion,
           fileData: data,
         });
-        await positioner.potentiallyUpdateLatestInstallers(
-          lock,
-          req.targetApp,
-          upToDateChannel,
-        );
       } else {
         d('Database inconsistency detected while releasing for file:', file.id);
       }
     }
+
+    // Ahead of the latest/ links, which are a whole-channel concern of their own and can fail:
+    // registering the version has already consumed the draft, so anything that throws between
+    // positioning the packages and publishing them strands them in the pool with no way to retry
+    await positioner.regenerateLinuxRepos(lock, req.targetApp, upToDateChannel);
+    await positioner.potentiallyUpdateLatestInstallers(lock, req.targetApp, upToDateChannel);
     await positioner.cleanUpTemporaryFile(lock, req.targetApp, channel, save.saveString);
   }))) {
     return res.status(409).json({ error: 'Release already in progress' });
@@ -428,6 +429,8 @@ router.post('/:id/channel/:channelId/temporary_releases/release_all', requireLog
     };
 
     await runPQ(groupSavesForRelease(registeredSaves), releaseGroup, RELEASE_ALL_CONCURRENCY);
+
+    await positioner.regenerateLinuxRepos(lock, req.targetApp, upToDateChannel);
 
     if (results.some(r => r.success)) {
       await positioner.potentiallyUpdateLatestInstallers(

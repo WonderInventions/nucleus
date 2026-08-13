@@ -174,6 +174,11 @@ describe('temporary_releases endpoints', { timeout: 60000 }, () => {
         true,
         'The released artifact should be positioned on the owning channel',
       );
+      assert.strictEqual(
+        await helpers.store.hasFile(`${app.slug}/${channel.id}/latest/darwin/x64/${app.name}.dmg`),
+        true,
+        'The latest installer should be updated by a single-draft release',
+      );
     });
   });
 });

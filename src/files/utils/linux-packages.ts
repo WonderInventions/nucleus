@@ -7,6 +7,33 @@ export interface AdvertisedPackage {
   fileName: string;
 }
 
+/** Linux repos holding packages that have been positioned but are not yet advertised. */
+export interface PendingLinuxRepos {
+  apt: boolean;
+  yum: boolean;
+}
+
+/**
+ * Reads a package out of the pool, or null when the store does not hold it: a file can be
+ * registered against a version before its package lands, and the repo is built from what is
+ * actually there.
+ *
+ * Only a key the store does not have may answer with null, and the bytes are checked against the
+ * size the store reported, because both a failed size check and a failed read otherwise look
+ * exactly like an absent or empty package -- which is how a rebuild would publish metadata with a
+ * package silently left out of it.
+ */
+export const readPackageFromPool = async (store: IFileStore, key: string): Promise<Buffer | null> => {
+  const size = await store.getFileSize(key);
+  if (!size) return null;
+
+  const data = await store.getFile(key);
+  if (data.length !== size) {
+    throw new Error(`Read ${data.length} bytes of ${key} from the store, which reported ${size}`);
+  }
+  return data;
+};
+
 /**
  * The packages a linux repo advertises: every package of the given kind belonging to the
  * semver-greatest non-dead version that carries one.

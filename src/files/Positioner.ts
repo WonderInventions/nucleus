@@ -4,8 +4,9 @@ import debug from 'debug';
 import * as path from 'path';
 import * as semver from 'semver';
 
-import { initializeAptRepo, addFileToAptRepo, getAptPackageKey, regenerateAptMetadata } from './utils/apt';
-import { initializeYumRepo, addFileToYumRepo, getYumPackageKey, regenerateYumMetadata } from './utils/yum';
+import { initializeAptRepo, addDebToPool, getAptPackageKey, regenerateAptMetadata } from './utils/apt';
+import { PendingLinuxRepos } from './utils/linux-packages';
+import { initializeYumRepo, addRpmToPool, getYumPackageKey, regenerateYumMetadata } from './utils/yum';
 import { updateDarwinReleasesFiles } from './utils/darwin';
 import { updateWin32ReleasesFiles } from './utils/win32';
 
@@ -22,6 +23,7 @@ type PositionerLock = string;
 
 export default class Positioner {
   private store: IFileStore;
+  private pendingLinuxRepos: PendingLinuxRepos = { apt: false, yum: false };
 
   constructor(store: IFileStore) {
     this.store = store;
@@ -143,6 +145,34 @@ export default class Positioner {
 
   public regenerateYumRepo = async (app: NucleusApp, channel: NucleusChannel) => {
     await regenerateYumMetadata(this.store, app, channel);
+  }
+
+  /**
+   * Publish the linux packages positioned under this lock.
+   *
+   * handleUpload only puts a package in the pool, so every release has to end here or the
+   * packages it positioned stay unadvertised.  Rebuilding once, after they are all in the pool,
+   * is also what stops a release publishing the states in between -- a repo advertising one
+   * architecture of a version whose other architecture has not landed yet.
+   *
+   * Which repos to rebuild is tracked as packages are positioned rather than passed in, so a
+   * caller cannot rebuild the wrong ones, and releaseLock can say so when a caller does not get
+   * here at all.  The channel must be the one re-read after the version's files were registered:
+   * the metadata is built from it, and a stale copy would advertise the previous release.
+   */
+  public regenerateLinuxRepos = async (lock: PositionerLock, app: NucleusApp, channel: NucleusChannel) => {
+    const repos = this.pendingLinuxRepos;
+    if (!repos.apt && !repos.yum) return;
+    if (lock !== await this.currentLock(app, channel)) return;
+    if (repos.apt) {
+      await this.regenerateAptRepo(app, channel);
+    }
+    if (repos.yum) {
+      await this.regenerateYumRepo(app, channel);
+    }
+    // Cleared last, so a rebuild that throws leaves the packages marked unadvertised and
+    // releaseLock reports them
+    this.pendingLinuxRepos = { apt: false, yum: false };
   }
 
   /**
@@ -339,11 +369,13 @@ export default class Positioner {
     fileData,
   }: HandlePlatformUploadOpts) {
     if (file.fileName.endsWith('.rpm')) {
-      d('Adding rpm file to yum repo');
-      await addFileToYumRepo(this.store, { app, channel, file, fileData, internalVersion });
+      d('Adding rpm file to the yum package pool');
+      await addRpmToPool(this.store, { app, channel, file, fileData, internalVersion });
+      this.pendingLinuxRepos.yum = true;
     } else if (file.fileName.endsWith('.deb')) {
-      d('Adding deb file to apt repo');
-      await addFileToAptRepo(this.store, { app, channel, file, fileData, internalVersion });
+      d('Adding deb file to the apt package pool');
+      await addDebToPool(this.store, { app, channel, file, fileData, internalVersion });
+      this.pendingLinuxRepos.apt = true;
     } else {
       console.warn('Will not upload unknown linux file');
     }
@@ -373,6 +405,18 @@ export default class Positioner {
   }
 
   public releaseLock = async (app: NucleusApp, channel: NucleusChannel, lock: PositionerLock) => {
+    // Nothing downstream will pick these up: the packages are in the pool and the metadata that
+    // should advertise them was never rebuilt, so they stay invisible until some later release
+    // happens to rebuild the same repo
+    if (this.pendingLinuxRepos.apt || this.pendingLinuxRepos.yum) {
+      console.error(JSON.stringify({
+        message: 'Released the channel lock with linux packages that were never advertised',
+        app: app.slug,
+        channel: channel.id,
+        ...this.pendingLinuxRepos,
+      }));
+      this.pendingLinuxRepos = { apt: false, yum: false };
+    }
     const lockFile = this.lockKey(app, channel);
     const currentLock = (await this.store.getFile(lockFile)).toString('utf8');
     if (currentLock === lock) {

@@ -818,6 +818,117 @@ describe('Positioner', () => {
     });
   });
 
+  describe('regenerateLinuxRepos', () => {
+    let regenerateAptRepo: SinonStub;
+    let regenerateYumRepo: SinonStub;
+    let consoleError: SinonStub;
+
+    const position = async (fileName: string) => {
+      await positioner.handleUpload(lock, {
+        app: fakeApp,
+        channel: fakeChannel,
+        internalVersion: { name: '0.0.2', rollout: 100 } as any,
+        file: { ...generateSHAs(Buffer.from('')), arch: 'x64', platform: 'linux', fileName, type: 'installer' },
+        fileData: Buffer.from(''),
+      });
+    };
+
+    beforeEach(() => {
+      regenerateAptRepo = promiseStub();
+      regenerateYumRepo = promiseStub();
+      positioner.regenerateAptRepo = regenerateAptRepo;
+      positioner.regenerateYumRepo = regenerateYumRepo;
+      consoleError = stub(console, 'error');
+      // Every step here re-reads the lock, so hold it for the whole test rather than one call
+      fakeStore.getFile.callsFake(async (key: string) =>
+        key.endsWith('.lock') ? Buffer.from(lock) : Buffer.from(''));
+      fakeStore.getFile.resetHistory();
+    });
+
+    afterEach(() => {
+      consoleError.restore();
+    });
+
+    it('should rebuild only the repo whose packages were positioned', async () => {
+      await position('thing.deb');
+
+      await positioner.regenerateLinuxRepos(lock, fakeApp, fakeChannel);
+
+      assert.strictEqual(regenerateAptRepo.callCount, 1);
+      assert.ok(regenerateAptRepo.calledWith(fakeApp, fakeChannel));
+      assert.strictEqual(regenerateYumRepo.callCount, 0);
+    });
+
+    // Positioning an rpm signs it, which needs a real gpg key and rpmsign, so the yum half is
+    // driven through the state that step leaves behind rather than through the step itself
+    it('should rebuild both repos when a release positioned debs and rpms', async () => {
+      await position('thing.deb');
+      (positioner as any).pendingLinuxRepos.yum = true;
+
+      await positioner.regenerateLinuxRepos(lock, fakeApp, fakeChannel);
+
+      assert.strictEqual(regenerateAptRepo.callCount, 1);
+      assert.strictEqual(regenerateYumRepo.callCount, 1);
+    });
+
+    it('should do nothing for a release that positioned no linux packages', async () => {
+      await positioner.regenerateLinuxRepos(lock, fakeApp, fakeChannel);
+
+      assert.strictEqual(regenerateAptRepo.callCount, 0);
+      assert.strictEqual(regenerateYumRepo.callCount, 0);
+      // Not even the lock read: every darwin and win32 release goes through here too
+      assert.strictEqual(fakeStore.getFile.callCount, 0);
+    });
+
+    it('should not rebuild the same packages twice', async () => {
+      await position('thing.deb');
+
+      await positioner.regenerateLinuxRepos(lock, fakeApp, fakeChannel);
+      await positioner.regenerateLinuxRepos(lock, fakeApp, fakeChannel);
+
+      assert.strictEqual(regenerateAptRepo.callCount, 1);
+    });
+
+    it('should publish nothing without a valid lock', async () => {
+      await position('thing.deb');
+
+      await positioner.regenerateLinuxRepos('not-the-lock', fakeApp, fakeChannel);
+
+      assert.strictEqual(regenerateAptRepo.callCount, 0);
+      assert.strictEqual(regenerateYumRepo.callCount, 0);
+    });
+
+    it('should report a release that positioned packages and never published them', async () => {
+      await position('thing.deb');
+
+      await positioner.releaseLock(fakeApp, fakeChannel, lock);
+
+      assert.strictEqual(consoleError.callCount, 1);
+      const reported = JSON.parse(consoleError.getCall(0).args[0]);
+      assert.strictEqual(reported.message, 'Released the channel lock with linux packages that were never advertised');
+      assert.deepStrictEqual({ apt: reported.apt, yum: reported.yum }, { apt: true, yum: false });
+    });
+
+    it('should report a release whose rebuild failed', async () => {
+      regenerateAptRepo.rejects(new Error('dpkg-scanpackages exploded'));
+      await position('thing.deb');
+
+      await assert.rejects(positioner.regenerateLinuxRepos(lock, fakeApp, fakeChannel));
+      await positioner.releaseLock(fakeApp, fakeChannel, lock);
+
+      assert.strictEqual(consoleError.callCount, 1);
+    });
+
+    it('should say nothing when the packages were published before the lock went', async () => {
+      await position('thing.deb');
+
+      await positioner.regenerateLinuxRepos(lock, fakeApp, fakeChannel);
+      await positioner.releaseLock(fakeApp, fakeChannel, lock);
+
+      assert.strictEqual(consoleError.callCount, 0);
+    });
+  });
+
   describe('locking', () => {
     beforeEach(() => {
       const files: {
