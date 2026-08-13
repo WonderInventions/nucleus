@@ -3,12 +3,16 @@ import * as fs from 'fs/promises';
 import * as path from 'path';
 import debug from 'debug';
 
+import { packagesForLinuxRepo } from './linux-packages';
 import { spawnPromiseAndCapture, escapeShellArguments } from './spawn';
 import { syncDirectoryToStore } from './sync';
 import { withTmpDir } from './tmp';
 import * as config from '../../config';
 
 const d = debug(`nucleus:files:yum`);
+
+// Everything createrepo writes lands here; the packages sit beside it and must not be re-uploaded
+const YUM_METADATA_DIR = 'repodata';
 
 const pathExists = async (p: string): Promise<boolean> => {
   try {
@@ -86,49 +90,51 @@ const signRpm = async (rpm: string) => {
   });
 };
 
-const signAllRpmFiles = async (dir: string) => {
-  const rpmFiles = (await fs.readdir(dir))
-    .filter(file => file.endsWith('.rpm'))
-    .map(file => path.resolve(dir, file));
-  for (const rpm of rpmFiles) {
-    d(`Signing ${rpm}`);
-    await signRpm(rpm);
-  }
-};
-
 export const getYumPackageKey = (app: NucleusApp, channel: NucleusChannel, versionName: string, fileName: string) =>
   path.posix.join(app.slug, channel.id!, 'linux', 'redhat', `${versionName}-${fileName}`);
 
 /**
+ * Stages the packages the repo advertises, minus one the caller is about to write itself.
+ *
+ * Everything in the pool was signed on its way in, so nothing staged here is re-signed: signing
+ * rewrites the rpm, which would change the published bytes of packages that shipped weeks ago.
+ */
+const stageAdvertisedRpms = async (
+  store: IFileStore,
+  app: NucleusApp,
+  channel: NucleusChannel,
+  tmpDir: string,
+  exclude?: { versionName: string; fileName: string },
+) => {
+  for (const pkg of packagesForLinuxRepo(channel, '.rpm')) {
+    if (exclude && pkg.versionName === exclude.versionName && pkg.fileName === exclude.fileName) continue;
+    const packageKey = getYumPackageKey(app, channel, pkg.versionName, pkg.fileName);
+    // A file can be registered against the version before its package reaches the store, and the
+    // store reports the missing key as an empty buffer, which createrepo rejects
+    if (await store.getFileSize(packageKey)) {
+      await fs.writeFile(path.resolve(tmpDir, `${pkg.versionName}-${pkg.fileName}`), await store.getFile(packageKey));
+    }
+  }
+};
+
+/**
  * Rebuild the yum repo metadata from the packages that should currently be
- * advertised (every non-dead version's rpm, mirroring addFileToYumRepo)
- * without adding anything.  Used after deleting packages so the metadata never
- * advertises files that no longer exist.  The rpms pulled from the store are
- * already signed so no re-signing is needed.
+ * advertised, without adding anything.  Used after deleting packages so the
+ * metadata never advertises files that no longer exist.
  */
 export const regenerateYumMetadata = async (store: IFileStore, app: NucleusApp, channel: NucleusChannel) => {
   await withTmpDir(async (tmpDir) => {
     const storeKey = path.posix.join(app.slug, channel.id!, 'linux', 'redhat');
     await fs.mkdir(`${tmpDir}/repodata`, { recursive: true });
 
-    for (const version of channel.versions) {
-      if (!version.dead) {
-        // A version can carry one rpm per arch, keep every one of them advertised
-        for (const versionFile of (version.files || []).filter((f) => f.fileName.endsWith(".rpm") && f.platform === "linux")) {
-          const packageKey = getYumPackageKey(app, channel, version.name, versionFile.fileName);
-          if (await store.getFileSize(packageKey)) {
-            await fs.writeFile(`${tmpDir}/${version.name}-${versionFile.fileName}`, await store.getFile(packageKey));
-          }
-        }
-      }
-    }
+    await stageAdvertisedRpms(store, app, channel, tmpDir);
 
     d(`Regenerating repo metadata`);
     const [exe, args] = getCreateRepoCommand(tmpDir, ['-v', '--no-database', './']);
     await cp.spawn(exe, args, {
       cwd: tmpDir,
     });
-    await syncDirectoryToStore(store, storeKey, tmpDir);
+    await syncDirectoryToStore(store, storeKey, tmpDir, YUM_METADATA_DIR);
     await createRepoFile(store, app, channel);
   });
 };
@@ -159,35 +165,34 @@ export const addFileToYumRepo = async (store: IFileStore, {
     const storeKey = path.posix.join(app.slug, channel.id!, 'linux', 'redhat');
     // Copy the XML files in repodata/
     await fs.mkdir(`${tmpDir}/repodata`, { recursive: true });
-    // Copy the RPMs
-    for (const version of channel.versions) {
-      if (!version.dead) {
-        const versionFile = (version.files || []).find((f) => f.fileName.endsWith(".rpm") && f.platform === "linux");
-        if (versionFile && versionFile.fileName !== file.fileName) {
-          const fname = `${version.name}-${versionFile.fileName}`;
-          const packageKey = getYumPackageKey(app, channel, version.name, versionFile.fileName);
-          if (await store.getFileSize(packageKey)) {
-            await fs.writeFile(`${tmpDir}/${fname}`, await store.getFile(packageKey));
-          }
-        }
-      }
-    }
+    await stageAdvertisedRpms(store, app, channel, tmpDir, {
+      versionName: internalVersion.name,
+      fileName: file.fileName,
+    });
+
     const binaryPath = path.resolve(tmpDir, `${internalVersion.name}-${file.fileName}`);
     if (await pathExists(binaryPath)) {
       throw new Error('Uploaded a duplicate file');
     }
     await fs.writeFile(binaryPath, fileData);
-    await signAllRpmFiles(tmpDir);
+    d(`Signing ${binaryPath}`);
+    await signRpm(binaryPath);
+
     d(`Updating repo`);
     const [exe, args] = getCreateRepoCommand(tmpDir, ['-v', '--update', '--no-database', '--deltas', './']);
     await cp.spawn(exe, args, {
       cwd: tmpDir,
     });
-    await syncDirectoryToStore(
-      store,
-      storeKey,
-      tmpDir,
+
+    // Signing rewrote the file, so the pool has to receive what was actually indexed.  Written
+    // before the metadata that references it, so a failure in between leaves an unadvertised
+    // package rather than metadata pointing at a key that 404s
+    await store.putFile(
+      getYumPackageKey(app, channel, internalVersion.name, file.fileName),
+      await fs.readFile(binaryPath),
+      true,
     );
+    await syncDirectoryToStore(store, storeKey, tmpDir, YUM_METADATA_DIR);
     d(`Creating repo file`);
     await createRepoFile(store, app, channel);
   });
