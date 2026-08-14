@@ -69,6 +69,17 @@ describe('DualWriteStore', () => {
       assert.strictEqual(secondary.putFile.callCount, 0);
     });
 
+    // The primary has already written by the time the heal is considered, and the secondary is
+    // never allowed to fail that
+    it('should report the primary write even when the secondary cannot say whether it holds the key', async () => {
+      primary.putFile.resolves(false);
+      secondary.hasFile.rejects(new Error('secondary unreachable'));
+
+      assert.strictEqual(await store.putFile('myKey', Buffer.from('value')), false);
+
+      assert.strictEqual(secondary.putFile.callCount, 0);
+    });
+
     it('should propagate primary write failures without touching the secondary', async () => {
       primary.putFile.rejects(new Error('primary down'));
 
@@ -107,6 +118,16 @@ describe('DualWriteStore', () => {
     it('should not touch the secondary when the primary skipped and the secondary has the key', async () => {
       primary.copyFile.resolves(false);
       secondary.hasFile.resolves(true);
+
+      assert.strictEqual(await store.copyFile('from', 'to'), false);
+
+      assert.strictEqual(secondary.copyFile.callCount, 0);
+      assert.strictEqual(secondary.putFile.callCount, 0);
+    });
+
+    it('should report the primary copy even when the secondary cannot say whether it holds the key', async () => {
+      primary.copyFile.resolves(false);
+      secondary.hasFile.rejects(new Error('secondary unreachable'));
 
       assert.strictEqual(await store.copyFile('from', 'to'), false);
 

@@ -51,7 +51,7 @@ export default class DualWriteStore implements IFileStore {
     if (wrote) {
       d(`Mirroring write of '${key}' to the secondary store`);
       await this.mirrorWrite(key, data);
-    } else if (!await this.secondary.hasFile(key)) {
+    } else if (!await this.secondaryHolds(key)) {
       // The primary already had this key but the secondary does not, e.g.
       // because an earlier mirror write failed.  Heal with the primary's
       // bytes, which are authoritative and may differ from this upload
@@ -83,7 +83,7 @@ export default class DualWriteStore implements IFileStore {
     if (wrote) {
       d(`Mirroring copy of '${fromKey}' to '${toKey}' on the secondary store`);
       await this.mirrorCopy(fromKey, toKey);
-    } else if (!await this.secondary.hasFile(toKey)) {
+    } else if (!await this.secondaryHolds(toKey)) {
       const primaryData = await this.primary.getFile(toKey);
       if (primaryData.length > 0) {
         console.log(JSON.stringify({
@@ -94,6 +94,20 @@ export default class DualWriteStore implements IFileStore {
       }
     }
     return wrote;
+  }
+
+  /**
+   * Only ever asked about the secondary, and only to decide whether to heal it, so a check that
+   * cannot be answered is read as "assume it holds it": the primary has already written by this
+   * point, and the secondary is not allowed to fail that.
+   */
+  private async secondaryHolds(key: string) {
+    try {
+      return await this.secondary.hasFile(key);
+    } catch (err) {
+      d(`Could not ask the secondary store about '${key}', leaving it as it is`);
+      return true;
+    }
   }
 
   /**

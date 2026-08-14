@@ -20,7 +20,8 @@ import S3Store, {
   buildS3ClientOptions,
   S3_CONNECTION_TIMEOUT_MS,
   S3_MAX_ATTEMPTS,
-  S3_REQUEST_TIMEOUT_MS,
+  S3_READ_ATTEMPTS,
+  S3_SOCKET_TIMEOUT_MS,
 } from '../s3/S3Store';
 
 describe('S3Store', () => {
@@ -95,6 +96,19 @@ describe('S3Store', () => {
     it('should return false when headObject returns NotFound', async () => {
       s3Mock.on(HeadObjectCommand).rejects({ name: 'NotFound' });
       assert.strictEqual(await store.hasFile('myKey'), false);
+    });
+
+    it('should return false for a 404 that does not name itself NotFound', async () => {
+      s3Mock.on(HeadObjectCommand).rejects({ name: 'SomethingElse', $metadata: { httpStatusCode: 404 } });
+      assert.strictEqual(await store.hasFile('myKey'), false);
+    });
+
+    // A yes is what makes putFile skip the write, so a failed check answering with one drops a
+    // file from the release and reports nothing
+    it('should throw when the check cannot be answered', async () => {
+      s3Mock.on(HeadObjectCommand).rejects({ name: 'InternalError', $metadata: { httpStatusCode: 500 } });
+
+      await assert.rejects(store.hasFile('myKey'), { name: 'InternalError' });
     });
   });
 
@@ -251,21 +265,69 @@ describe('S3Store', () => {
   });
 
   describe('getFile', () => {
+    const bodyOf = (value: string) => {
+      const stream = new Readable();
+      stream.push(Buffer.from(value));
+      stream.push(null);
+      return sdkStreamMixin(stream);
+    };
+
     it('should default to empty buffer when file not found', async () => {
-      s3Mock.on(GetObjectCommand).rejects(new Error('Not found'));
+      s3Mock.on(GetObjectCommand).rejects({ name: 'NoSuchKey' });
       const result = await store.getFile('key');
       assert.strictEqual(result.toString(), '');
     });
 
-    it('should load the file contents if it exists', async () => {
-      const stream = new Readable();
-      stream.push(Buffer.from('thisIsValue'));
-      stream.push(null);
-      const sdkStream = sdkStreamMixin(stream);
+    it('should default to empty buffer for a 404 that does not name itself', async () => {
+      s3Mock.on(GetObjectCommand).rejects({ name: 'SomethingElse', $metadata: { httpStatusCode: 404 } });
+      assert.strictEqual((await store.getFile('key')).toString(), '');
+    });
 
-      s3Mock.on(GetObjectCommand).resolves({ Body: sdkStream });
+    it('should load the file contents if it exists', async () => {
+      s3Mock.on(GetObjectCommand).resolves({ Body: bodyOf('thisIsValue') });
       const result = await store.getFile('key');
       assert.strictEqual(result.toString(), 'thisIsValue');
+    });
+
+    // The lock, the .ref markers and versions.json are all read as "empty means not there", so a
+    // failed read answering with an empty buffer reads as an unlocked channel or no versions at all
+    it('should throw when the read fails rather than answer with an empty buffer', async () => {
+      s3Mock.on(GetObjectCommand).rejects({ name: 'TimeoutError', message: 'socket timed out' });
+
+      await assert.rejects(store.getFile('key'), { name: 'TimeoutError' });
+    });
+
+    it('should retry a failed read before giving up on it', async () => {
+      s3Mock.on(GetObjectCommand)
+        .rejectsOnce({ name: 'TimeoutError' })
+        .rejectsOnce({ name: 'TimeoutError' })
+        .resolves({ Body: bodyOf('thisIsValue') });
+
+      assert.strictEqual((await store.getFile('key')).toString(), 'thisIsValue');
+      assert.strictEqual(s3Mock.commandCalls(GetObjectCommand).length, S3_READ_ATTEMPTS);
+    });
+
+    it('should give up after a bounded number of attempts', async () => {
+      s3Mock.on(GetObjectCommand).rejects({ name: 'TimeoutError' });
+
+      await assert.rejects(store.getFile('key'), { name: 'TimeoutError' });
+      assert.strictEqual(s3Mock.commandCalls(GetObjectCommand).length, S3_READ_ATTEMPTS);
+    });
+
+    // A body that stops early is the shape a dropped connection takes, and a half-read installer
+    // published as a whole one is worse than a release that fails
+    it('should throw when fewer bytes arrive than the store said it would send', async () => {
+      // A fresh body per call, since a retry gets a new response rather than re-reading the stream
+      s3Mock.on(GetObjectCommand).callsFake(() => ({ Body: bodyOf('short'), ContentLength: 11 }));
+
+      await assert.rejects(store.getFile('key'), /Read 5 bytes of 'key'.*would send 11/);
+      assert.strictEqual(s3Mock.commandCalls(GetObjectCommand).length, S3_READ_ATTEMPTS);
+    });
+
+    it('should accept a body that matches the length the store reported', async () => {
+      s3Mock.on(GetObjectCommand).resolves({ Body: bodyOf('thisIsValue'), ContentLength: 11 });
+
+      assert.strictEqual((await store.getFile('key')).toString(), 'thisIsValue');
     });
   });
 
@@ -371,10 +433,18 @@ describe('S3Store', () => {
 
       assert.deepStrictEqual(options.requestHandler, {
         connectionTimeout: S3_CONNECTION_TIMEOUT_MS,
-        requestTimeout: S3_REQUEST_TIMEOUT_MS,
+        socketTimeout: S3_SOCKET_TIMEOUT_MS,
       });
       assert.strictEqual(S3_CONNECTION_TIMEOUT_MS, 10_000);
-      assert.strictEqual(S3_REQUEST_TIMEOUT_MS, 60_000);
+      assert.strictEqual(S3_SOCKET_TIMEOUT_MS, 60_000);
+    });
+
+    // requestTimeout looks like the same setting and is not: it bounds the whole request rather
+    // than a silence, and on its own it only logs a warning, so a stalled release keeps stalling
+    it('should not bound the whole request, only a silent one', () => {
+      const handler = buildS3ClientOptions(s3Config).requestHandler as Record<string, unknown>;
+
+      assert.ok(!('requestTimeout' in handler), 'requestTimeout would cut off a large healthy transfer');
     });
 
     it('should retry more than the SDK default, since aborting alone does not finish the request', () => {
@@ -414,7 +484,7 @@ describe('S3Store', () => {
       assert.ok(handler.configProvider, 'expected the request handler to expose its pending config');
       const handlerConfig = await handler.configProvider;
       assert.strictEqual(handlerConfig.connectionTimeout, S3_CONNECTION_TIMEOUT_MS);
-      assert.strictEqual(handlerConfig.requestTimeout, S3_REQUEST_TIMEOUT_MS);
+      assert.strictEqual(handlerConfig.socketTimeout, S3_SOCKET_TIMEOUT_MS);
     });
   });
 });

@@ -21,20 +21,32 @@ const MAX_DELETE_BATCH = 1000;
 export const S3_CONNECTION_TIMEOUT_MS = 10_000;
 
 /**
- * An *inactivity* timeout on the socket, not a deadline for the whole request, so a multi-hundred
- * megabyte installer upload keeps resetting it for as long as bytes are moving and is never cut
- * off part way.  Only a connection that has gone completely silent is abandoned.
+ * An inactivity timeout on the socket, which the handler destroys and rejects the moment it fires.
+ * A multi-hundred megabyte installer keeps resetting it for as long as bytes are moving, so only a
+ * connection that has gone completely silent is abandoned.
+ *
+ * Not `requestTimeout`, which is a deadline for the whole request and would cut off a large but
+ * perfectly healthy transfer -- and which, absent `throwOnRequestTimeout`, only logs a warning and
+ * leaves the socket open, so nothing fails and the retries below never engage.
  *
  * Without one, a stalled connection is bounded by nothing but the kernel's TCP retransmit budget,
  * which is around a quarter of an hour.  A release publishing every platform at once holds the
  * caller for the whole of that, and it has already timed out a release client that gave up long
  * before Nucleus did.
  */
-export const S3_REQUEST_TIMEOUT_MS = 60_000;
+export const S3_SOCKET_TIMEOUT_MS = 60_000;
 
 // Aborting a stalled request only helps if the retry is what completes it, and a release is not
 // re-runnable once its drafts are consumed, so this sits above the SDK's default of 3
 export const S3_MAX_ATTEMPTS = 5;
+
+/**
+ * The SDK's retries cover fetching an object, not reading it: the body arrives afterwards, on a
+ * stream it has already handed over, so a connection that dies part way through a large installer
+ * comes back as a bare read error with nothing behind it.  Releasing consumes the drafts, so that
+ * error costs a re-cut build -- worth a few more attempts of our own.
+ */
+export const S3_READ_ATTEMPTS = 3;
 
 export const buildS3ClientOptions = (s3Config: S3Options): NonNullable<ConstructorParameters<typeof S3Client>[0]> => {
   // The timeouts are handed over as plain options rather than a constructed NodeHttpHandler so
@@ -43,7 +55,7 @@ export const buildS3ClientOptions = (s3Config: S3Options): NonNullable<Construct
     maxAttempts: S3_MAX_ATTEMPTS,
     requestHandler: {
       connectionTimeout: S3_CONNECTION_TIMEOUT_MS,
-      requestTimeout: S3_REQUEST_TIMEOUT_MS,
+      socketTimeout: S3_SOCKET_TIMEOUT_MS,
     },
   };
 
@@ -100,10 +112,13 @@ export default class S3Store implements IFileStore {
       }));
       return true;
     } catch (err: any) {
+      // putFile and copyFile skip the write when this reports the key is already there, so a check
+      // that could not be answered must not answer yes: that is a file dropped from a release with
+      // the write reported as a no-op it never was
       if (err.name === 'NotFound' || err.$metadata?.httpStatusCode === 404) {
         return false;
       }
-      return true;
+      throw err;
     }
   }
 
@@ -167,20 +182,34 @@ export default class S3Store implements IFileStore {
   public async getFile(key: string) {
     d(`Fetching file: '${key}'`);
     const s3 = this.getS3();
-    try {
-      const response = await s3.send(new GetObjectCommand({
-        Bucket: this.s3Config.bucketName,
-        Key: key,
-      }));
-      if (response.Body) {
+    let lastError: any;
+    for (let attempt = 1; attempt <= S3_READ_ATTEMPTS; attempt += 1) {
+      try {
+        const response = await s3.send(new GetObjectCommand({
+          Bucket: this.s3Config.bucketName,
+          Key: key,
+        }));
+        if (!response.Body) {
+          return Buffer.from('');
+        }
         const bytes = await response.Body.transformToByteArray();
+        if (response.ContentLength !== undefined && bytes.length !== response.ContentLength) {
+          throw new Error(`Read ${bytes.length} bytes of '${key}' from the store, which said it would send ${response.ContentLength}`);
+        }
         return Buffer.from(bytes);
+      } catch (err: any) {
+        // An empty buffer is how every caller reads "not in the store", and the lock, the .ref
+        // markers and versions.json are all read that way, so answering a failure with one is how
+        // a blip comes to look like an unlocked channel or a version list with nothing in it
+        if (err.name === 'NoSuchKey' || err.$metadata?.httpStatusCode === 404) {
+          d('File not found, defaulting to empty buffer');
+          return Buffer.from('');
+        }
+        d(`Failed to read '${key}' on attempt ${attempt} of ${S3_READ_ATTEMPTS}: ${err.message}`);
+        lastError = err;
       }
-      return Buffer.from('');
-    } catch (err) {
-      d('File not found, defaulting to empty buffer');
-      return Buffer.from('');
     }
+    throw lastError;
   }
 
   public async deletePath(key: string) {
