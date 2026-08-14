@@ -436,7 +436,13 @@ describe('S3Store', () => {
         socketTimeout: S3_SOCKET_TIMEOUT_MS,
       });
       assert.strictEqual(S3_CONNECTION_TIMEOUT_MS, 10_000);
-      assert.strictEqual(S3_SOCKET_TIMEOUT_MS, 60_000);
+      assert.strictEqual(S3_SOCKET_TIMEOUT_MS, 20_000);
+    });
+
+    // A copy is silent for as long as the store takes to duplicate the object, measured at up to
+    // 7.6s for the installers, and it is the only thing here that has no bytes to keep it alive
+    it('should leave room for a server side copy to finish', () => {
+      assert.ok(S3_SOCKET_TIMEOUT_MS >= 15_000, 'a copy of a ~200MB installer needs the headroom');
     });
 
     // requestTimeout looks like the same setting and is not: it bounds the whole request rather

@@ -22,8 +22,13 @@ export const S3_CONNECTION_TIMEOUT_MS = 10_000;
 
 /**
  * An inactivity timeout on the socket, which the handler destroys and rejects the moment it fires.
- * A multi-hundred megabyte installer keeps resetting it for as long as bytes are moving, so only a
- * connection that has gone completely silent is abandoned.
+ * Sending and receiving both keep resetting it, so a transfer that is merely slow survives and only
+ * a connection that has gone quiet is abandoned.
+ *
+ * Sized for CopyObject rather than for the transfers, which is what makes it this large: a copy
+ * sends a request and then waits for the store to duplicate the object, so it is silent for its
+ * whole duration, measured at 4.4-7.6s for the ~200MB installers with six copies in flight.  A
+ * transfer of the same object is never silent for more than the gap between two chunks.
  *
  * Not `requestTimeout`, which is a deadline for the whole request and would cut off a large but
  * perfectly healthy transfer -- and which, absent `throwOnRequestTimeout`, only logs a warning and
@@ -34,7 +39,7 @@ export const S3_CONNECTION_TIMEOUT_MS = 10_000;
  * caller for the whole of that, and it has already timed out a release client that gave up long
  * before Nucleus did.
  */
-export const S3_SOCKET_TIMEOUT_MS = 60_000;
+export const S3_SOCKET_TIMEOUT_MS = 20_000;
 
 // Aborting a stalled request only helps if the retry is what completes it, and a release is not
 // re-runnable once its drafts are consumed, so this sits above the SDK's default of 3
