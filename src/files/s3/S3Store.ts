@@ -30,6 +30,8 @@ export const S3_CONNECTION_TIMEOUT_MS = 10_000;
  * whole duration, measured at 4.4-7.6s for the ~200MB installers with six copies in flight.  A
  * transfer of the same object is never silent for more than the gap between two chunks.
  *
+ * 1 minute is used as a generous grace period because PubObject has sometimes been observed to hang.
+ *
  * Not `requestTimeout`, which is a deadline for the whole request and would cut off a large but
  * perfectly healthy transfer -- and which, absent `throwOnRequestTimeout`, only logs a warning and
  * leaves the socket open, so nothing fails and the retries below never engage.
@@ -39,7 +41,7 @@ export const S3_CONNECTION_TIMEOUT_MS = 10_000;
  * caller for the whole of that, and it has already timed out a release client that gave up long
  * before Nucleus did.
  */
-export const S3_SOCKET_TIMEOUT_MS = 20_000;
+export const S3_SOCKET_TIMEOUT_MS = 60_000;
 
 // Aborting a stalled request only helps if the retry is what completes it, and a release is not
 // re-runnable once its drafts are consumed, so this sits above the SDK's default of 3
