@@ -218,18 +218,12 @@ export default class ChannelVersionList extends React.PureComponent<ChannelVersi
     return arr[arr.length - 1];
   }
 
-  private download = file => () => {
-    const version = this.state.modalVersion.version.name;
-
-    let downloadURL = `${this.props.baseUpdateUrl}/${this.props.app.slug}/${this.props.channel.id}/_index/${version}/${file.platform}/${file.arch}/${file.fileName}`;
-
-    if (this.state.modalVersion && this.state.modalVersion.isPreRelease) {
-      downloadURL = `/rest/app/${this.props.app.id}/channel/${this.props.channel.id}/temporary_releases/${this.state.modalVersion.preReleaseId}/${file.fileName}`;
+  private downloadUrl(file: NucleusFile) {
+    const { modalVersion } = this.state;
+    if (modalVersion.isPreRelease) {
+      return `/rest/app/${this.props.app.id}/channel/${this.props.channel.id}/temporary_releases/${modalVersion.preReleaseId}/${file.fileName}`;
     }
-    const aTag = document.createElement('a');
-    aTag.href = downloadURL;
-    aTag.download = 'true';
-    aTag.click();
+    return `${this.props.baseUpdateUrl}/${this.props.app.slug}/${this.props.channel.id}/_index/${modalVersion.version.name}/${file.platform}/${file.arch}/${file.fileName}`;
   }
 
   private release = async () => {
@@ -498,7 +492,7 @@ export default class ChannelVersionList extends React.PureComponent<ChannelVersi
               }
               {
                 this.state.modalVersion.version.files.map((file, index) => (
-                  <div key={index} className={styles.fileDownloadContainer} onClick={this.download(file)}>
+                  <a key={index} className={styles.fileDownloadContainer} href={this.downloadUrl(file)} download>
                     <div className={styles.fileDownload}>
                       <div className={styles.fileName}>
                         <DownloadIcon label="Download" />
@@ -510,7 +504,7 @@ export default class ChannelVersionList extends React.PureComponent<ChannelVersi
                         <span>Ext: {this.fileExt(file.fileName)}</span>
                       </div>
                     </div>
-                  </div>
+                  </a>
                 ))
               }
             </AkModalDialog>
