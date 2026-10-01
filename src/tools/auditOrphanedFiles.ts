@@ -4,8 +4,9 @@
  * Orphans accumulate when a deletion flow removes database rows without
  * (fully) removing the stored files.  This script diffs the artifact
  * namespaces of every app/channel against the database and prints the
- * orphaned keys as JSON, one report per channel.  It is read-only: deleting
- * anything is left to the operator after reviewing the report.
+ * orphaned keys as JSON, one report per channel and one per app for draft
+ * payloads under temp/.  It is read-only: deleting anything is left to the
+ * operator after reviewing the report.
  *
  * Usage (needs database + file store access, i.e. the prod config):
  *   yarn tsx src/tools/auditOrphanedFiles.ts [path/to/config.js]
@@ -24,6 +25,33 @@ const main = async () => {
   let totalBytes = 0;
 
   for (const app of await driver.getApps()) {
+    const draftSaveStrings = new Set<string>();
+    for (const channel of app.channels) {
+      for (const save of await driver.getTemporarySaves(app, channel)) {
+        draftSaveStrings.add(save.saveString);
+      }
+    }
+    // Draft payloads are written before their draft is recorded, so an upload still in flight
+    // shows up here too and is only an orphan if it is still listed on a later run
+    const tempPrefix = `${app.slug}/temp/`;
+    const tempOrphans = (await store.listFiles(tempPrefix)).filter((key) => {
+      const saveString = key.substring(tempPrefix.length).split('/')[0];
+      return !draftSaveStrings.has(saveString);
+    });
+    let tempOrphanBytes = 0;
+    for (const key of tempOrphans) {
+      tempOrphanBytes += await store.getFileSize(key);
+    }
+    totalOrphans += tempOrphans.length;
+    totalBytes += tempOrphanBytes;
+    console.log(JSON.stringify({
+      app: app.slug,
+      draftsInDatabase: draftSaveStrings.size,
+      orphanCount: tempOrphans.length,
+      orphanBytes: tempOrphanBytes,
+      orphans: tempOrphans,
+    }, null, 2));
+
     for (const channel of app.channels) {
       const expectedKeys = new Set<string>();
       const versionNames = new Set<string>();
