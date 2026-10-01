@@ -245,6 +245,49 @@ describe('release_all endpoint', { timeout: 120000 }, () => {
       );
     });
 
+    it('should leave a draft whose payload is missing unreleased and in place', async () => {
+      await uploadDraft('6.0.0', 'darwin', 'x64', ['test-app-6.0.0.dmg']);
+      const draft = (await listDrafts()).find(save => save.version === '6.0.0')!;
+      await helpers.store.deletePath(`${app.slug}/temp/${draft.saveString}`);
+
+      const response = await releaseAll('6.0.0');
+
+      assert.strictEqual(response.status, 500, `Expected a failure: ${JSON.stringify(response.body)}`);
+      assert.strictEqual(response.body.released, 0);
+      assert.strictEqual(response.body.failed, 1);
+      assert.match(response.body.results[0].error, /missing \[test-app-6\.0\.0\.dmg\]/);
+      assert.ok(
+        (await listDrafts()).some(save => `${save.id}` === `${draft.id}`),
+        'The draft should not be consumed when its payload is missing',
+      );
+      assert.strictEqual(
+        (await getChannel()).versions.some(v => v.name === '6.0.0'),
+        false,
+        'Nothing should have been registered against 6.0.0',
+      );
+    });
+
+    it('should leave a draft duplicating already registered files unreleased and in place', async () => {
+      await uploadDraft('7.0.0', 'darwin', 'x64', ['test-app-7.0.0.dmg']);
+      await uploadDraft('7.0.0', 'darwin', 'x64', ['test-app-7.0.0.dmg']);
+
+      const response = await releaseAll('7.0.0');
+
+      assert.strictEqual(response.status, 500, `Expected a partial failure: ${JSON.stringify(response.body)}`);
+      assert.strictEqual(response.body.released, 1);
+      assert.strictEqual(response.body.failed, 1);
+      assert.match(response.body.results.find((r: any) => !r.success).error, /already has darwin\/x64 files/);
+      assert.strictEqual(await helpers.store.hasFile(`${app.slug}/${channel.id}/darwin/x64/test-app-7.0.0.dmg`), true);
+
+      const remaining = (await listDrafts()).filter(save => save.version === '7.0.0');
+      assert.strictEqual(remaining.length, 1, 'The duplicate draft should not be consumed');
+      assert.strictEqual(
+        await helpers.store.hasFile(`${app.slug}/temp/${remaining[0].saveString}/test-app-7.0.0.dmg`),
+        true,
+        'The duplicate draft should keep its payload',
+      );
+    });
+
     it('should return 409 and leave the drafts alone while the channel lock is held', async () => {
       await uploadDraft('5.0.0', 'darwin', 'x64', ['test-app-5.0.0.dmg']);
 

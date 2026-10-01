@@ -2,7 +2,7 @@ import { Sequelize } from 'sequelize-typescript';
 
 import * as semver from 'semver';
 
-import BaseDriver from '../BaseDriver';
+import BaseDriver, { FilesAlreadyRegisteredError } from '../BaseDriver';
 import getSequelize, { App, TeamMember, Channel, Version, File, TemporarySave, TemporarySaveFile, Migration } from './models';
 import { randomUUID } from 'crypto';
 import BaseMigration from '../../migrations/BaseMigration';
@@ -223,7 +223,7 @@ export default class SequelizeDriver extends BaseDriver {
     return saves.map(save => this.fixSaveStruct(save));
   }
 
-  public async saveTemporaryVersionFiles(app: NucleusApp, channel: NucleusChannel, version: string, filenames: string[], arch: string, platform: NucleusPlatform) {
+  public async saveTemporaryVersionFiles(app: NucleusApp, channel: NucleusChannel, { platform, arch, version, filenames, saveString, cipherPassword }: Omit<ITemporarySave, 'id' | 'date'>) {
     await this.ensureConnected();
 
     const rawChannel = (await Channel.findOne<Channel>({
@@ -235,8 +235,8 @@ export default class SequelizeDriver extends BaseDriver {
       arch,
       version,
       date: new Date(),
-      saveString: randomUUID(),
-      cipherPassword: randomUUID(),
+      saveString,
+      cipherPassword,
       channelId: rawChannel.id,
     });
     await save.save();
@@ -264,6 +264,12 @@ export default class SequelizeDriver extends BaseDriver {
       where: { name: save.version, channelId: rawSave.channelId },
       include: [File],
     });
+    // Skipping the clashing names instead would still consume the draft, so a duplicate draft
+    // would be reported as released while none of its payload was ever positioned
+    const alreadyRegistered = save.filenames.filter(fileName => (dbVersion?.files || []).some(file => this.isInherentlySameFile(file.fileName, fileName) && file.arch === save.arch && file.platform === save.platform));
+    if (alreadyRegistered.length > 0) {
+      throw new FilesAlreadyRegisteredError(save, alreadyRegistered);
+    }
     if (!dbVersion) {
       const channelHasVersion = !!(Version.findOne<Version>({
         where: { channelId: rawSave.channelId },
