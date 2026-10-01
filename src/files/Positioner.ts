@@ -54,14 +54,39 @@ export default class Positioner {
     const storeKey = path.join(app.slug, 'temp', saveString, fileName);
     const derivedKey = crypto.scryptSync(cipherPassword, SCRYPT_SALT, KEY_LENGTH);
     const raw = await this.store.getFile(storeKey);
+    // The store answers a missing key with an empty buffer, which would otherwise surface as an
+    // opaque "Invalid initialization vector"
+    if (raw.length === 0) {
+      throw new Error(`Temporary file ${saveString}/${fileName} is missing from the store`);
+    }
     const iv = raw.subarray(0, IV_LENGTH);
     const data = raw.subarray(IV_LENGTH);
     const decipher = crypto.createDecipheriv(CIPHER_MODE, derivedKey, iv);
     return Buffer.concat([decipher.update(data), decipher.final()]);
   }
 
+  /**
+   * The names in the save whose payload never made it into the store
+   */
+  public async getMissingTemporaryFiles(app: NucleusApp, save: ITemporarySave) {
+    const missing: string[] = [];
+    for (const fileName of save.filenames) {
+      if (await this.store.getFileSize(path.join(app.slug, 'temp', save.saveString, fileName)) === 0) {
+        missing.push(fileName);
+      }
+    }
+    return missing;
+  }
+
   public async cleanUpTemporaryFile(lock: PositionerLock, app: NucleusApp, channel: NucleusChannel, saveString: string) {
     if (lock !== await this.currentLock(app, channel)) return;
+    await this.deleteTemporaryFiles(app, saveString);
+  }
+
+  /**
+   * Only for a save no one else can have reached yet, everything else goes through cleanUpTemporaryFile
+   */
+  public async deleteTemporaryFiles(app: NucleusApp, saveString: string) {
     d(`Deleting all temporary files for app: ${app.slug} in save ID: ${saveString}`);
     await this.store.deletePath(path.join(app.slug, 'temp', saveString));
   }

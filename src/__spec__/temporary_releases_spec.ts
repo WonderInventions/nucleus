@@ -181,4 +181,67 @@ describe('temporary_releases endpoints', { timeout: 60000 }, () => {
       );
     });
   });
+
+  describe('drafts without a complete payload', () => {
+    const listDrafts = async () => {
+      const resp = await helpers.request
+        .get(`/app/${app.id}/channel/${channel.id}/temporary_releases`)
+        .send();
+      return resp.body as ITemporarySave[];
+    };
+
+    it('should not record a draft when its payload cannot be stored', async () => {
+      const before = (await listDrafts()).length;
+      // A file where the temp directory belongs makes every payload write fail
+      await helpers.store.deletePath(`${app.slug}/temp`);
+      await helpers.store.putFile(`${app.slug}/temp`, Buffer.from('not-a-directory'));
+      try {
+        const upload = await uploadDraft('4.0.0', 'test-app-4.0.0.dmg');
+        assert.strictEqual(upload.status, 500, `Expected the upload to fail: ${JSON.stringify(upload.body)}`);
+        assert.strictEqual((await listDrafts()).length, before, 'A failed upload should not leave a draft behind');
+      } finally {
+        await helpers.store.deletePath(`${app.slug}/temp`);
+      }
+
+      const retry = await uploadDraft('4.0.0', 'test-app-4.0.0.dmg');
+      assert.strictEqual(retry.status, 200, `Retry failed: ${JSON.stringify(retry.body)}`);
+      assert.strictEqual((await listDrafts()).length, before + 1, 'The retry should leave exactly one draft');
+    });
+
+    it('should refuse to release a draft whose payload is missing, and keep the draft', async () => {
+      const upload = await uploadDraft('5.0.0', 'test-app-5.0.0.dmg');
+      assert.strictEqual(upload.status, 200, `Upload failed: ${JSON.stringify(upload.body)}`);
+      const draft = (await listDrafts()).find(save => save.version === '5.0.0')!;
+      await helpers.store.deletePath(`${app.slug}/temp/${draft.saveString}`);
+
+      const response = await helpers.request
+        .post(`/app/${app.id}/channel/${channel.id}/temporary_releases/${draft.id}/release`)
+        .send();
+
+      assert.strictEqual(response.status, 400, `Expected a 400: ${JSON.stringify(response.body)}`);
+      assert.match(response.body.error, /missing \[test-app-5\.0\.0\.dmg\]/);
+      assert.ok((await listDrafts()).some(save => `${save.id}` === `${draft.id}`), 'The draft should not be consumed');
+    });
+
+    it('should refuse to release a draft duplicating already registered files, and keep the draft', async () => {
+      const first = await uploadDraft('6.0.0', 'test-app-6.0.0.dmg');
+      const second = await uploadDraft('6.0.0', 'test-app-6.0.0.dmg');
+      assert.strictEqual(first.status, 200, `Upload failed: ${JSON.stringify(first.body)}`);
+      assert.strictEqual(second.status, 200, `Upload failed: ${JSON.stringify(second.body)}`);
+      const [original, duplicate] = (await listDrafts()).filter(save => save.version === '6.0.0');
+
+      const released = await helpers.request
+        .post(`/app/${app.id}/channel/${channel.id}/temporary_releases/${original.id}/release`)
+        .send();
+      assert.strictEqual(released.status, 200, `Release failed: ${JSON.stringify(released.body)}`);
+
+      const response = await helpers.request
+        .post(`/app/${app.id}/channel/${channel.id}/temporary_releases/${duplicate.id}/release`)
+        .send();
+
+      assert.strictEqual(response.status, 400, `Expected a 400: ${JSON.stringify(response.body)}`);
+      assert.match(response.body.error, /already has darwin\/x64 files/);
+      assert.ok((await listDrafts()).some(save => `${save.id}` === `${duplicate.id}`), 'The duplicate draft should not be consumed');
+    });
+  });
 });

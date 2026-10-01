@@ -7,6 +7,13 @@ import BaseMigration from '../migrations/BaseMigration';
 
 const IDENTIFYING_SUFFIXES = ['-full.nupkg', '-delta.nupkg', '.exe', '.msi', '.zip', '.dmg', '.pkg', '.deb', '.rpm'];
 
+export class FilesAlreadyRegisteredError extends Error {
+  constructor(save: ITemporarySave, fileNames: string[]) {
+    super(`Version ${save.version} already has ${save.platform}/${save.arch} files matching [${fileNames.join(', ')}]`);
+    this.name = 'FilesAlreadyRegisteredError';
+  }
+}
+
 export abstract class IDBDriver {
   public abstract ensureConnected(): Promise<void>;
   public abstract getApps(): Promise<NucleusApp[]>;
@@ -19,7 +26,7 @@ export abstract class IDBDriver {
   public abstract getChannel(app: NucleusApp, channelId: ChannelID): Promise<NucleusChannel | null>;
   public abstract deleteTemporarySave(save: ITemporarySave): Promise<void>;
   public abstract getTemporarySaves(app: NucleusApp, channel: NucleusChannel): Promise<ITemporarySave[]>;
-  public abstract saveTemporaryVersionFiles(app: NucleusApp, channel: NucleusChannel, version: string, filenames: string[], arch: string, platform: NucleusPlatform): Promise<ITemporarySave>;
+  public abstract saveTemporaryVersionFiles(app: NucleusApp, channel: NucleusChannel, save: Omit<ITemporarySave, 'id' | 'date'>): Promise<ITemporarySave>;
   public abstract registerVersionFiles(save: ITemporarySave): Promise<string[]>;
   public abstract setVersionDead(app: NucleusApp, channel: NucleusChannel, version: string, dead: boolean): Promise<NucleusChannel>;
   public abstract setVersionRollout(app: NucleusApp, channel: NucleusChannel, version: string, rollout: number): Promise<NucleusChannel>;

@@ -1,4 +1,5 @@
 import debug from 'debug';
+import { randomUUID } from 'crypto';
 import express from 'express';
 import * as semver from 'semver';
 import isPng from 'is-png';
@@ -6,6 +7,7 @@ import multer from 'multer';
 
 import { createA } from '../utils/a';
 import driver from '../db/driver';
+import { FilesAlreadyRegisteredError } from '../db/BaseDriver';
 import store from '../files/store';
 import Positioner from '../files/Positioner';
 import { generateSHAs } from '../files/utils/sha';
@@ -70,6 +72,17 @@ const checkFields = (req: Express.Request, res: Express.Response, fields: string
 const getChannelTemporarySave = async (app: NucleusApp, channel: NucleusChannel, temporarySaveId: string) => {
   const saves = await driver.getTemporarySaves(app, channel);
   return saves.find(save => `${save.id}` === temporarySaveId) || null;
+};
+
+/**
+ * Checked before registering, which is what consumes the draft: past that point a draft that
+ * cannot be released can no longer be retried or deleted, only re-uploaded at a new version
+ */
+const getUnreleasableReason = async (positioner: Positioner, app: NucleusApp, save: ITemporarySave) => {
+  const missing = await positioner.getMissingTemporaryFiles(app, save);
+  if (missing.length > 0) {
+    return `Draft ${save.id} (${save.platform}/${save.arch}) is missing [${missing.join(', ')}] from the store, it was never fully uploaded`;
+  }
 };
 
 const hasPermission = (req: Express.Request, app: NucleusApp) => {
@@ -266,11 +279,22 @@ router.post('/:id/channel/:channelId/temporary_releases/:temporarySaveId/release
   }
 
   const positioner = new Positioner(store);
+  let rejection: string | undefined;
 
   if (!(await positioner.withLock(req.targetApp, channel, async (lock) => {
+    rejection = await getUnreleasableReason(positioner, req.targetApp, save);
+    if (rejection) return;
+
     d(`User ${req.user ? req.user.id : "none"} or token (${(req.headers.authorization || "none").substring(0, 4)}...) promoted a temporary release for app: '${req.targetApp.slug}' on channel: ${channel.name} becomes version: ${save.version}`);
 
-    const storedFileNames = await driver.registerVersionFiles(save);
+    let storedFileNames: string[];
+    try {
+      storedFileNames = await driver.registerVersionFiles(save);
+    } catch (err) {
+      if (!(err instanceof FilesAlreadyRegisteredError)) throw err;
+      rejection = err.message;
+      return;
+    }
     d(`Tested files: [${save.filenames.join(', ')}] but stored: [${storedFileNames.join(', ')}]`);
 
     // Get up to date channel
@@ -310,6 +334,9 @@ router.post('/:id/channel/:channelId/temporary_releases/:temporarySaveId/release
     await positioner.cleanUpTemporaryFile(lock, req.targetApp, channel, save.saveString);
   }))) {
     return res.status(409).json({ error: 'Release already in progress' });
+  }
+  if (rejection) {
+    return res.status(400).json({ error: rejection });
   }
 
   res.json({ success: true });
@@ -363,6 +390,8 @@ router.post('/:id/channel/:channelId/temporary_releases/release_all', requireLog
     const registeredSaves: ITemporarySave[] = [];
     for (const save of saves) {
       try {
+        const rejection = await getUnreleasableReason(positioner, req.targetApp, save);
+        if (rejection) throw new Error(rejection);
         storedFileNamesBySave.set(save.id, await driver.registerVersionFiles(save));
         registeredSaves.push(save);
       } catch (err) {
@@ -731,18 +760,37 @@ router.post('/:id/channel/:channelId/upload', noPendingMigrations, upload.any(),
           });
         }
       }
-      const temporaryStore = await driver.saveTemporaryVersionFiles(
-        req.targetApp,
-        channel,
-        req.body.version,
-        fileNames,
-        req.body.arch,
-        req.body.platform,
-      );
+      const saveString = randomUUID();
+      const cipherPassword = randomUUID();
       const positioner = new Positioner(store);
-      for (let fileKey = 0; fileKey < files.length; fileKey += 1) {
-        const file = files[fileKey];
-        await positioner.saveTemporaryFile(req.targetApp, temporaryStore.saveString, file.originalname, file.buffer, temporaryStore.cipherPassword);
+      // The draft is only recorded once its payload is in the store: a draft listed before then
+      // can be released with nothing behind it, and one left behind by a failed write sits beside
+      // the draft the client's retry creates
+      try {
+        for (const file of files) {
+          await positioner.saveTemporaryFile(req.targetApp, saveString, file.originalname, file.buffer, cipherPassword);
+        }
+        await driver.saveTemporaryVersionFiles(req.targetApp, channel, {
+          version: req.body.version,
+          filenames: fileNames,
+          arch: req.body.arch,
+          platform: req.body.platform,
+          saveString,
+          cipherPassword,
+        });
+      } catch (err) {
+        try {
+          await positioner.deleteTemporaryFiles(req.targetApp, saveString);
+        } catch (cleanUpErr) {
+          console.error(JSON.stringify({
+            message: 'Failed to delete the payload of an upload that did not complete',
+            app: req.targetApp.slug,
+            channel: channel.id,
+            saveString,
+            err: `${cleanUpErr}`,
+          }));
+        }
+        throw err;
       }
       res.json({ success: true });
     } else {

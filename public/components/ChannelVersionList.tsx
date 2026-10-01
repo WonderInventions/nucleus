@@ -243,6 +243,10 @@ export default class ChannelVersionList extends React.PureComponent<ChannelVersi
         });
         return;
       }
+      if (!response.ok) {
+        const body = await response.json().catch(() => null);
+        alert(`Releasing this draft failed: ${body && body.error ? body.error : `HTTP ${response.status}`}`);
+      }
       await this.fetch();
       await this.props.updateApps(false);
       this.setState({
